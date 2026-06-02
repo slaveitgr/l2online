@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { L2LoginClient, type GameServer, type LoginEvent } from "@/lib/l2-protocol/login-client";
 import { L2GameClient, setGameConnection, type GameEvent } from "@/lib/l2-protocol/game-client";
+import loginVideo from "@/assets/login_web.mp4.asset.json";
 
 const GAME_PROTOCOL = 502;
 
