@@ -364,6 +364,13 @@ export function WorldViewport() {
             </div>
           </div>
         )}
+        {mapInfo && (
+          <div className="mt-2 pt-2 border-t border-border/40 text-foreground/80">
+            <span className="text-gold-muted">map</span> {mapInfo.path} ·{" "}
+            <span className="text-gold-muted">actors</span> {mapInfo.actors} ·{" "}
+            <span className="text-gold-muted">spawns</span> {mapInfo.spawns}
+          </div>
+        )}
       </div>
 
       {/* Bottom-right controls hint */}
