@@ -8,7 +8,60 @@ import {
   type CacheStats,
   type PrefetchProgress,
 } from "@/lib/l2-assets";
-import { loadManifest, summarizeFolders, type FolderSummary } from "@/lib/cdn-manifest";
+import { loadManifest, summarizeFolders, type FolderSummary, type ManifestFile } from "@/lib/cdn-manifest";
+
+interface RangeTestResult {
+  file: string;
+  size: number;
+  head: {
+    status: number;
+    contentLength: string | null;
+    acceptRanges: string | null;
+    cors: string | null;
+    ok: boolean;
+  };
+  range: {
+    status: number;
+    contentRange: string | null;
+    bytesReceived: number;
+    expectedBytes: number;
+    cors: string | null;
+    ok: boolean;
+  };
+  durationMs: number;
+}
+
+async function runRangeTest(file: ManifestFile): Promise<RangeTestResult> {
+  const url = `/api/cdn/${file.path}`;
+  const t0 = performance.now();
+
+  const head = await fetch(url, { method: "HEAD" });
+  const expectedBytes = Math.min(1024, file.size);
+  const rangeEnd = expectedBytes - 1;
+  const range = await fetch(url, { headers: { Range: `bytes=0-${rangeEnd}` } });
+  const buf = await range.arrayBuffer();
+
+  return {
+    file: file.path,
+    size: file.size,
+    head: {
+      status: head.status,
+      contentLength: head.headers.get("content-length"),
+      acceptRanges: head.headers.get("accept-ranges"),
+      cors: head.headers.get("access-control-allow-origin"),
+      ok: head.ok && head.headers.get("accept-ranges") === "bytes",
+    },
+    range: {
+      status: range.status,
+      contentRange: range.headers.get("content-range"),
+      bytesReceived: buf.byteLength,
+      expectedBytes,
+      cors: range.headers.get("access-control-allow-origin"),
+      ok: range.status === 206 && buf.byteLength === expectedBytes,
+    },
+    durationMs: Math.round(performance.now() - t0),
+  };
+}
 
 export const Route = createFileRoute("/cdn-cache")({
   head: () => ({
