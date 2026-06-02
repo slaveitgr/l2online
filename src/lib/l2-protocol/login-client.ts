@@ -333,7 +333,9 @@ export class L2LoginClient {
         return;
       }
       case 0x06: {
-        this.settle({ type: "login-fail", reason: "Play failed (server rejected)", code: 0x06 });
+        const ev: LoginEvent = { type: "login-fail", reason: "Play failed (server rejected)", code: 0x06 };
+        if (this.playResolve) { this.playResolve(ev); this.playResolve = null; this.emit(ev); }
+        else this.settle(ev);
         return;
       }
       case 0x0d: {
