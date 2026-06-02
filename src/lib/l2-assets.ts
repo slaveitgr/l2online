@@ -87,12 +87,20 @@ export async function isCached(path: string): Promise<boolean> {
   return v !== undefined;
 }
 
-/** Get a file by path: cache-first, then CDN. */
+/** Get a file by path: IndexedDB cache → mounted local folder → CDN. */
 export async function getFile(path: string): Promise<Uint8Array | null> {
   const db = await getDB();
   const k = path.toLowerCase();
   const hit = (await db.get(STORE, k)) as Uint8Array | undefined;
   if (hit) return hit;
+  // Try local-folder mount before falling back to network — no IndexedDB copy.
+  try {
+    const { readFromMount } = await import("./local-mount");
+    const local = await readFromMount(path);
+    if (local) return local;
+  } catch {
+    // mount module/permission failure — fall through to CDN
+  }
   return fetchFromCDN(path);
 }
 
