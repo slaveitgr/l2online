@@ -381,4 +381,16 @@ export class L2LoginClient {
     this.emit({ type: "status", message: "Sending RequestServerList" });
     this.sendFrame(body);
   }
+
+  private sendRequestPIAgreement() {
+    // RequestPIAgreement (opcode 0x0F): session id + agreement flag = 1
+    const body = new PacketWriter()
+      .u8(0x0f)
+      .u32(this.sessionId)
+      .u8(0x01)
+      .build();
+    this.emit({ type: "status", message: "Sending RequestPIAgreement(accept=1)" });
+    this.sendFrame(body);
+  }
 }
+
