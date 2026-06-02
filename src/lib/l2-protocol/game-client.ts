@@ -15,7 +15,7 @@
  */
 import { GameCrypt } from "./game-crypt";
 import { classNameOf, raceNameOf } from "./classes";
-import { appendChecksumAndPad, PacketReader, PacketWriter } from "./packets";
+import { PacketReader, PacketWriter } from "./packets";
 
 export interface GameCharacter {
   id: string;          // objectId as hex
