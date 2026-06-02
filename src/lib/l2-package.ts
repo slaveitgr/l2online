@@ -45,6 +45,14 @@ export interface UExport {
   size: number;
   offset: number;
 }
+export interface StaticMeshGeometry {
+  name: string;
+  positions: Float32Array; // xyz per vertex
+  normals: Float32Array; // xyz per vertex
+  indices: Uint16Array; // triangle indices
+  vertexCount: number;
+  triangleCount: number;
+}
 export interface ActorPlacement {
   className: string;
   name: string;
@@ -168,10 +176,13 @@ export class L2Package {
     // imports: classPackage(ci name), className(ci name), package(int32), objectName(ci name)
     o = importOffset;
     for (let i = 0; i < importCount; i++) {
-      const [cp, s1] = readCompat32(b, o); o += s1;
-      const [cn, s2] = readCompat32(b, o); o += s2;
+      const [cp, s1] = readCompat32(b, o);
+      o += s1;
+      const [cn, s2] = readCompat32(b, o);
+      o += s2;
       o += 4; // package int32
-      const [on, s3] = readCompat32(b, o); o += s3;
+      const [on, s3] = readCompat32(b, o);
+      o += s3;
       this.imports.push({
         classPackage: this.nm(cp),
         className: this.nm(cn),
@@ -182,14 +193,22 @@ export class L2Package {
     // exports: class(ci) super(ci) package(int32) objectName(ci) flags(u32) size(ci) [offset(ci) if size>0]
     o = exportOffset;
     for (let i = 0; i < exportCount; i++) {
-      const [cls, s1] = readCompat32(b, o); o += s1;
+      const [cls, s1] = readCompat32(b, o);
+      o += s1;
       o += readCompat32(b, o)[1]; // super
       o += 4; // package int32
-      const [on, s4] = readCompat32(b, o); o += s4;
-      const flags = dv.getUint32(o, true); o += 4;
-      const [size, s5] = readCompat32(b, o); o += s5;
+      const [on, s4] = readCompat32(b, o);
+      o += s4;
+      const flags = dv.getUint32(o, true);
+      o += 4;
+      const [size, s5] = readCompat32(b, o);
+      o += s5;
       let offset = 0;
-      if (size > 0) { const [off2, s6] = readCompat32(b, o); o += s6; offset = off2; }
+      if (size > 0) {
+        const [off2, s6] = readCompat32(b, o);
+        o += s6;
+        offset = off2;
+      }
       let className: string;
       if (cls < 0) className = this.imports[-cls - 1]?.objectName ?? "?";
       else if (cls > 0) className = this.exports[cls - 1]?.objectName ?? "(exp)";
@@ -200,6 +219,109 @@ export class L2Package {
 
   private nm(i: number): string {
     return i >= 0 && i < this.names.length ? this.names[i].name : "?";
+  }
+
+  /** Find an export by object name (e.g. a StaticMesh). */
+  findExport(name: string): UExport | undefined {
+    return this.exports.find((e) => e.objectName === name);
+  }
+
+  /**
+   * Read a StaticMesh's geometry → {positions, normals, indices}.
+   * Validated against Dethrone_V_S.usx (house/railing/torch all correct).
+   * Layout: [stack] props → FBox(25)+FPlane(16) → sections → FBox(25)
+   *         → vertexStream(pos+normal) → color → alpha → uvStreams → indexStream.
+   */
+  readStaticMesh(nameOrExport: string | UExport): StaticMeshGeometry | null {
+    const e = typeof nameOrExport === "string" ? this.findExport(nameOrExport) : nameOrExport;
+    if (!e || e.size <= 0 || e.className !== "StaticMesh") return null;
+    const b = this.bytes;
+    const dv = this.dv;
+    const cur = { o: e.offset };
+    const ci = () => {
+      const [v, s] = readCompat32(b, cur.o);
+      cur.o += s;
+      return v;
+    };
+    const u8 = () => b[cur.o++];
+    const u16 = () => {
+      const v = dv.getUint16(cur.o, true);
+      cur.o += 2;
+      return v;
+    };
+    const skip = (n: number) => {
+      cur.o += n;
+    };
+
+    if (e.flags & RF_HAS_STACK) {
+      const nid = ci();
+      ci();
+      skip(12); // stateNode, probeMask(8)+latent(4)
+      if (nid !== 0) ci();
+    }
+    // tagged properties → None
+    let guard = 0;
+    for (;;) {
+      if (guard++ > 400) break;
+      const ni = ci();
+      if (this.nm(ni) === "None") break;
+      const info = u8();
+      const ptype = info & 0x0f,
+        szc = info & 0x70,
+        isArray = info & 0x80;
+      if (ptype === PT_STRUCT) ci();
+      let dsz: number;
+      if (szc in STATIC_SIZES) dsz = STATIC_SIZES[szc];
+      else if (szc === 0x50) dsz = u8();
+      else if (szc === 0x60) dsz = u16();
+      else if (szc === 0x70) {
+        dsz = dv.getUint32(cur.o, true);
+        cur.o += 4;
+      } else dsz = 0;
+      if (isArray && ptype !== PT_BOOL) u8();
+      if (ptype === PT_BOOL) continue;
+      skip(dsz);
+    }
+    skip(25);
+    skip(16); // UPrimitive: FBox + FPlane
+    const nsec = ci();
+    skip(nsec * 14); // FStaticMeshSection[]
+    skip(25); // boundingBox FBox
+
+    const V = ci();
+    const vbase = cur.o;
+    const positions = new Float32Array(V * 3);
+    const normals = new Float32Array(V * 3);
+    for (let i = 0; i < V; i++) {
+      const o = vbase + i * 24;
+      positions[i * 3] = dv.getFloat32(o, true);
+      positions[i * 3 + 1] = dv.getFloat32(o + 4, true);
+      positions[i * 3 + 2] = dv.getFloat32(o + 8, true);
+      normals[i * 3] = dv.getFloat32(o + 12, true);
+      normals[i * 3 + 1] = dv.getFloat32(o + 16, true);
+      normals[i * 3 + 2] = dv.getFloat32(o + 20, true);
+    }
+    skip(V * 24);
+    skip(4); // + revision
+    const nc = ci();
+    skip(nc * 4);
+    skip(4); // colorStream
+    const na = ci();
+    skip(na * 4);
+    skip(4); // alphaStream
+    const nuv = ci();
+    for (let i = 0; i < nuv; i++) {
+      const us = ci();
+      skip(us * 8);
+      skip(8);
+    } // uvStream + 2×int32
+
+    const I = ci();
+    const ibase = cur.o;
+    const indices = new Uint16Array(I);
+    for (let i = 0; i < I; i++) indices[i] = dv.getUint16(ibase + i * 2, true);
+
+    return { name: e.objectName, positions, normals, indices, vertexCount: V, triangleCount: (I / 3) | 0 };
   }
 
   /** Histogram of export class names — quick "what's in this map". */
@@ -237,7 +359,8 @@ export class L2Package {
     const end = e.offset + e.size;
 
     if (e.flags & RF_HAS_STACK) {
-      const [nid, s1] = readCompat32(b, o); o += s1;
+      const [nid, s1] = readCompat32(b, o);
+      o += s1;
       o += readCompat32(b, o)[1]; // stateNode
       o += 8; // probeMask int64
       o += 4; // latentAction int32
@@ -247,22 +370,33 @@ export class L2Package {
     const props: Record<string, unknown> = {};
     let guard = 0;
     while (o < end && guard++ < 400) {
-      const [ni, s] = readCompat32(b, o); o += s;
+      const [ni, s] = readCompat32(b, o);
+      o += s;
       const nm = this.nm(ni);
       if (nm === "None") break;
-      const info = b[o]; o += 1;
+      const info = b[o];
+      o += 1;
       const ptype = info & 0x0f;
       const szc = info & 0x70;
       const isArray = info & 0x80;
       if (ptype === PT_STRUCT) o += readCompat32(b, o)[1]; // struct name
       let dsz: number;
       if (szc in STATIC_SIZES) dsz = STATIC_SIZES[szc];
-      else if (szc === 0x50) { dsz = b[o]; o += 1; }
-      else if (szc === 0x60) { dsz = dv.getUint16(o, true); o += 2; }
-      else if (szc === 0x70) { dsz = dv.getUint32(o, true); o += 4; }
-      else dsz = 0;
+      else if (szc === 0x50) {
+        dsz = b[o];
+        o += 1;
+      } else if (szc === 0x60) {
+        dsz = dv.getUint16(o, true);
+        o += 2;
+      } else if (szc === 0x70) {
+        dsz = dv.getUint32(o, true);
+        o += 4;
+      } else dsz = 0;
       if (isArray && ptype !== PT_BOOL) o += 1; // (simplified array index)
-      if (ptype === PT_BOOL) { props[nm] = !!isArray; continue; }
+      if (ptype === PT_BOOL) {
+        props[nm] = !!isArray;
+        continue;
+      }
       if ((nm === "Location" || nm === "DrawScale3D") && dsz >= 12) {
         props[nm] = [dv.getFloat32(o, true), dv.getFloat32(o + 4, true), dv.getFloat32(o + 8, true)];
       } else if (nm === "DrawScale" && dsz === 4) {
@@ -285,24 +419,35 @@ export async function decryptRsaEncdec(encoded: Uint8Array, gmpLib: unknown): Pr
   const gmp = gmpLib as any;
   const MOD =
     "75b4d6de5c016544068a1acf125869f43d2e09fc55b8b1e289556daf9b8757635593446288b3653da1ce91c87bb1a5c18f16323495c55d7d72c0890a83f69bfd1fd9434eb1c02f3e4679edfa43309319070129c267c85604d87bb65bae205de3707af1d2108881abb567c3b3d069ae67c3a4c6a3aa93d26413d4c66094ae2039";
-  const EXP = 0x1d, BLOCK = 128;
-  const rop = gmp.binding.mpq_t(); gmp.binding.mpq_init(rop);
+  const EXP = 0x1d,
+    BLOCK = 128;
+  const rop = gmp.binding.mpq_t();
+  gmp.binding.mpq_init(rop);
   const mod = gmp.binding.mpz_t();
-  const pMod = gmp.binding.malloc_cstr(MOD); gmp.binding.mpz_init_set_str(mod, pMod, 16); gmp.binding.free(pMod);
+  const pMod = gmp.binding.malloc_cstr(MOD);
+  gmp.binding.mpz_init_set_str(mod, pMod, 16);
+  gmp.binding.free(pMod);
   const base = gmp.binding.mpz_t();
-  let readOffset = 0, position = 0, size = 0, startPosition = 0, buffer = new Uint8Array(0);
+  let readOffset = 0,
+    position = 0,
+    size = 0,
+    startPosition = 0,
+    buffer = new Uint8Array(0);
   const fill = (): boolean => {
     if (position !== size) return true;
     if (readOffset + BLOCK >= encoded.length) return false;
     const blk = encoded.slice(readOffset, readOffset + BLOCK);
     const bs = [...blk].map((x) => ("0" + x.toString(16)).slice(-2)).join("");
-    const pBase = gmp.binding.malloc_cstr(bs); gmp.binding.mpz_init_set_str(base, pBase, 16);
-    gmp.binding.mpz_powm_ui(rop, base, EXP, mod); gmp.binding.free(pBase);
+    const pBase = gmp.binding.malloc_cstr(bs);
+    gmp.binding.mpz_init_set_str(base, pBase, 16);
+    gmp.binding.mpz_powm_ui(rop, base, EXP, mod);
+    gmp.binding.free(pBase);
     const rs = ("0".repeat(bs.length) + gmp.binding.mpz_to_string(rop, 16)).slice(-bs.length);
     buffer = new Uint8Array(rs.match(/.{2}/g)!.map((x) => parseInt(x, 16)));
     size = buffer[3] & 0xff;
-    startPosition = BLOCK - size - (((BLOCK - 4) - size) % 4);
-    position = 0; readOffset = readOffset + startPosition + size;
+    startPosition = BLOCK - size - ((BLOCK - 4 - size) % 4);
+    position = 0;
+    readOffset = readOffset + startPosition + size;
     return true;
   };
   fill();
@@ -313,6 +458,8 @@ export async function decryptRsaEncdec(encoded: Uint8Array, gmpLib: unknown): Pr
     for (let i = position, j = 0; i < size; i++, j++) val[j] = buffer[startPosition + position++] & 0xff;
     inflator.push(val);
   }
-  gmp.binding.free(rop); gmp.binding.free(mod); gmp.binding.free(base);
+  gmp.binding.free(rop);
+  gmp.binding.free(mod);
+  gmp.binding.free(base);
   return inflator.result as Uint8Array;
 }
