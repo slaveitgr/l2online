@@ -42,9 +42,9 @@ export const Route = createFileRoute("/api/l2-bridge")({
         };
         let connect: (opts: { hostname: string; port: number }) => TcpSocket;
         try {
-          // Hide the specifier from Rollup's static analyzer entirely.
-          const dynImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
-          const mod = await dynImport("cloudflare:sockets");
+          // Build specifier at runtime so Rollup cannot statically analyze it.
+          const spec = "cloudflare:" + "sockets";
+          const mod = await import(/* @vite-ignore */ spec);
           connect = mod.connect as typeof connect;
         } catch (err) {
           return bad(500, `Raw TCP not available in this runtime: ${(err as Error).message}`);

@@ -1,105 +1,65 @@
-## Στόχος
+## Πρόβλημα
 
-1. **Πραγματικό login** στον `l2server.slave.gr` (όχι mock) — auth + server list + character list.
-2. **Files/Settings UI πριν το login** (CDN mount, local folder mount, cache status).
+Το `/api/l2-bridge` τρέχει αλλά πέφτει με 500:
 
----
-
-## Τι θα δουλέψει & τι όχι (να ξεκαθαριστεί)
-
-**Τεχνικά εμπόδια:**
-- Ο browser **δεν μπορεί** να ανοίξει raw TCP στο `l2server.slave.gr:2106`. Πρέπει να γίνει **WebSocket ↔ TCP bridge** στο backend μας.
-- Το backend τρέχει σε **Cloudflare Workers**. Έχει `connect()` από `cloudflare:sockets` που υποστηρίζει arbitrary TCP outbound — άρα bridge είναι εφικτό.
-- Το L2 login protocol είναι binary με **RSA-1024 (modified) + Blowfish-ECB + 2-byte LE length prefix + 8-byte checksum**. Διαφέρει σημαντικά ανά chronicle.
-- Δεν ξέρουμε σίγουρα το chronicle. Θα κάνουμε **auto-detect** από το `Init` packet (στέλνει protocol revision: 419/660/746/...).
-- Το «character list από game server» απαιτεί **δεύτερο bridge** σε άλλο host:port (παίρνουμε από `ServerList`) και ξανά crypto handshake. Διπλάσιος όγκος δουλειάς.
-
-**Honest expectation:** η ολοκληρωμένη υλοποίηση είναι **πολλές εκατοντάδες γραμμές crypto + packet parsing**. Θα πάρει χρόνο και πιθανότατα **iterations με δοκιμές κατά του πραγματικού server**, γιατί κάθε private server έχει μικρο-διαφοροποιήσεις (custom opcodes, NetPro filters, GameGuard, κ.λπ.). Αν ο slave.gr έχει **GameGuard/NPS/anti-bot**, το login θα μπλοκάρεται από browser ανεξάρτητα τι κάνουμε.
-
----
-
-## Plan
-
-### Step 1 — UI reorder (γρήγορο, ασφαλές)
-
-Αναδιάταξη του `src/routes/index.tsx`:
-- Πάνω: τίτλος + **Asset Status panel** (CDN mount state, local folder mount, cache size, "Mount folder" / "Open file manager" buttons) — αντλεί από `local-mount.ts` + `cdn-manifest.ts`
-- Κάτω: το login form (όπως είναι, αλλά συνδεδεμένο με το νέο flow του Step 2)
-- Δείχνει επίσης auth server (`l2server.slave.gr:2106`) που διαβάζεται από `l2-config.ts` (`loadL2Ini` + `summarize`)
-- Επιδιόρθωση του LastPass hydration mismatch με `suppressHydrationWarning` στο form wrapper
-
-### Step 2 — WebSocket↔TCP bridge (Cloudflare Worker)
-
-Νέο server route: **`src/routes/api/l2-bridge.ts`** (WebSocket endpoint).
-
-```text
-Browser ──WS──> /api/l2-bridge?host=l2server.slave.gr&port=2106
-                       │
-                       ├─ accept WebSocket
-                       ├─ import { connect } from "cloudflare:sockets"
-                       ├─ socket = connect({hostname, port})
-                       ├─ pipe WS frames ⇄ TCP socket (binary)
-                       └─ close on either side
+```
+Raw TCP not available in this runtime:
+Code generation from strings disallowed for this context
 ```
 
-- Allowlist hosts (μόνο `l2server.slave.gr` + ports από ini για να μη γίνει open proxy)
-- Binary frames και στις δύο κατευθύνσεις
-- Heartbeat ping/pong
+Το προηγούμενο fix χρησιμοποίησε `new Function("s","return import(s)")` για να κρύψει το `cloudflare:sockets` από τον Rollup analyzer. Όμως το Cloudflare workerd μπλοκάρει `eval`/`new Function` για λόγους ασφαλείας, οπότε το dynamic import δεν εκτελείται ποτέ → ο WebSocket κλείνει με error στον client.
 
-### Step 3 — L2 login protocol (client-side, στο browser)
+## Λύση
 
-Νέο module **`src/lib/l2-protocol/`**:
+Δύο μικρές αλλαγές, καμία αλλαγή στο UI ή το πρωτόκολλο.
 
-```text
-src/lib/l2-protocol/
-├── blowfish.ts        # Blowfish-ECB (port από L2J reference, ~300 lines)
-├── rsa.ts             # RSA-1024 modified (Web Crypto + manual padding)
-├── checksum.ts        # XOR checksum για packets
-├── packets.ts         # Packet writer/reader (LE, strings UCS-2)
-├── login-client.ts    # State machine: Init → AuthGameGuard → RequestAuthLogin → LoginOk → RequestServerList → ServerList
-└── opcodes.ts         # Chronicle-specific opcode tables (Classic / Interlude / GoD)
+### 1) `src/routes/api/l2-bridge.ts` — runtime specifier + `@vite-ignore`
+
+Αντικατάσταση του `new Function(...)` με κανονικό dynamic import, όπου το specifier χτίζεται runtime (δεν φαίνεται σαν literal στον Rollup) και προσθέτουμε `/* @vite-ignore */` για να μη βγάλει warning ο Vite:
+
+```ts
+const spec = "cloudflare:" + "sockets"; // hide from static analysis
+const mod = await import(/* @vite-ignore */ spec);
+connect = mod.connect;
 ```
 
-**Flow:**
-1. WS open → server στέλνει `Init` packet (opcode 0x00): περιέχει RSA public key (128 bytes) + Blowfish key (16 bytes) + protocol revision
-2. Auto-detect chronicle από revision
-3. (Αν χρειάζεται) `AuthGameGuard` reply με 0x00 (no GG)
-4. `RequestAuthLogin`: encrypt username+password με RSA → στείλε με Blowfish encryption
-5. Λάβε `LoginOk` (session keys) ή `LoginFail` (account/password wrong, ban, κ.λπ.)
-6. `RequestServerList` → λάβε λίστα servers με IPs/ports
-7. Update UI: δείξε πραγματικούς servers αντί για mock
+Αυτό εκτελείται κανονικά στο workerd (δεν είναι eval), και δεν θεωρείται από τον bundler ως resolvable specifier.
 
-### Step 4 — Game server connection (για character list)
+### 2) `vite.config.ts` — externalize `cloudflare:sockets`
 
-Δεύτερος WS bridge στον game server IP (από ServerList). Νέο μικρότερο protocol module για το game side (διαφορετικά opcodes, διαφορετική crypto rotation). 
+Για να μην εσκαλάρει ο `@vitejs/plugin-react` το rollup warning "unresolved import treated as external" σε build failure, το δηλώνουμε ρητά external. Το μήνυμα του ίδιου του Vite προτείνει αυτή τη λύση:
 
-**Risk:** εδώ είναι το πιο πιθανό σημείο αποτυχίας — πολλοί servers έχουν προστασίες (IP geofence, client signature, hwid check). Αν χτυπήσει wall, θα σταματήσουμε στο ServerList και θα ενημερώσουμε.
+```ts
+export default defineConfig({
+  tanstackStart: { server: { entry: "server" } },
+  vite: {
+    build: {
+      rollupOptions: {
+        external: ["cloudflare:sockets"],
+      },
+    },
+  },
+});
+```
 
-### Step 5 — UI integration
+Σημείωση: δεν αγγίζουμε `ssr.external` ή `resolve.external` (απαγορεύεται από το template). Το `build.rollupOptions.external` είναι ασφαλές γιατί το `cloudflare:` είναι protocol που τον σερβίρει το ίδιο το workerd runtime — δεν χρειάζεται bundling.
 
-- Πραγματικός servers list (από Step 3)
-- Real error messages (Account does not exist, Wrong password, Server is full, κ.λπ.)
-- Character list page (`/characters.tsx` — υπάρχει ήδη ως stub) γεμίζει από Step 4
+## Verification
 
----
+Μετά το deploy:
 
-## Technical notes (για reference)
+```
+curl -i --http1.1 \
+  -H "Upgrade: websocket" -H "Connection: Upgrade" \
+  -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+  "https://l2online.lovable.app/api/l2-bridge?host=l2server.slave.gr&port=2106"
+```
 
-- **L2J reference implementation** για το login crypto: github.com/L2J/L2J_Login (πηγή για τα packet formats και RSA padding)
-- **Cloudflare Workers TCP**: `connect()` λειτουργεί από Workers Free, αλλά με rate limits. Outbound σε port 2106 επιτρέπεται.
-- **Hydration mismatch** (από LastPass extension στα inputs): λύνεται με `suppressHydrationWarning` στο `<form>` — δεν προκαλείται από εμάς.
-- **Chronicle detection**: protocol revisions — 419=C4, 660=Interlude, 746=Gracia, 152/267=Classic, >=27x=Salvation+. Θα log-άρουμε ότι βρούμε και θα προσαρμόσουμε opcode table.
+Αναμενόμενο: **HTTP/1.1 101 Switching Protocols** (όχι 500). Από το UI: το log θα δείξει `connected → init → ...` αντί για `WebSocket error`.
 
----
+## Αρχεία
 
-## Παραδοτέα ανά step
-
-| Step | Files | Risk |
-|------|-------|------|
-| 1 | `src/routes/index.tsx` | low |
-| 2 | `src/routes/api/l2-bridge.ts` | medium (Worker TCP quotas) |
-| 3 | `src/lib/l2-protocol/*` (6 files) | high (crypto correctness) |
-| 4 | `src/lib/l2-protocol/game-client.ts` + game bridge | very high (server-specific) |
-| 5 | `src/routes/index.tsx`, `src/routes/characters.tsx` | low |
-
-**Πρόταση:** ας κάνουμε **Steps 1+2+3 σε αυτή τη φάση** ώστε να έχουμε real auth + real server list. Το Step 4 (char list) το αφήνουμε για επόμενο γύρο αφού επιβεβαιώσουμε ότι το auth δουλεύει κατά του slave.gr. Αν συμφωνείς, κάνε approve και ξεκινάω.
+| File | Change |
+|---|---|
+| `src/routes/api/l2-bridge.ts` | Αντικατάσταση `new Function` με runtime-built specifier + `/* @vite-ignore */` |
+| `vite.config.ts` | Προσθήκη `vite.build.rollupOptions.external: ["cloudflare:sockets"]` |
