@@ -6,7 +6,7 @@ import { getMountStatus, pickFolder, unmount, type MountStatus } from "@/lib/loc
 import { getCacheStats, formatBytes, type CacheStats } from "@/lib/l2-assets";
 import { loadL2Ini, summarize, type L2Summary } from "@/lib/l2-config";
 
-const INTERLUDE_GAME_PROTOCOL = 746;
+const GAME_PROTOCOL = 502;
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -121,7 +121,7 @@ function Launcher() {
       }
       const [p1, p2] = playEv.playKey;
       const [k1, k2] = login.loginSessionKey;
-      const protocolRevision = INTERLUDE_GAME_PROTOCOL;
+      const protocolRevision = GAME_PROTOCOL;
       // Login server connection is no longer needed.
       login.close();
 
