@@ -1,20 +1,16 @@
 /**
  * L2 Game Server client — Mobius 12.3 "Superion", protocol 502.
  *
- * Handles the post-login pipeline AND the enter-world handshake:
- *
  *   ProtocolVersion(0x0E) → KeyPacket(0x2E) → AuthLogin(0x2B)
  *     → CharSelectionInfo(0x09)            [roster]
  *     → CharacterSelect(0x12) → CharSelected(0x0B)
  *     → EnterWorld(0x11)                   [spawn handshake]
- *     → … world packets (UserInfo etc.)   [logged, not yet parsed]
+ *     → world packets: UserInfo / NpcInfo / Move / Delete …
  *
- * Encryption gate: KeyPacket carries a PACKET_ENCRYPTION int after the seed.
- * slave.gr runs it = 0, so the whole stream is PLAINTEXT. We honour the flag.
- *
- * This client now KEEPS THE SOCKET OPEN after the roster so the same TCP
- * connection can select a character and enter the world. Use the module
- * singleton (getGameConnection / setGameConnection) to carry it across routes.
+ * Now includes a lightweight WORLD ENTITY LAYER: it parses the player's own
+ * position/stats from CharSelected, plus NpcInfo(0x0C) spawns,
+ * MoveToLocation(0x2F) moves and DeleteObject(0x08) despawns, maintaining an
+ * entity map the viewport can render. Encryption gate honoured (slave.gr = off).
  */
 import { GameCrypt } from "./game-crypt";
 import { classNameOf, raceNameOf } from "./classes";
@@ -26,7 +22,31 @@ export interface GameCharacter {
   klass: string;
   race: string;
   level: number;
-  color: string; // derived for UI
+  color: string;
+}
+
+/** The player's own character, from CharSelected (flat, reliable). */
+export interface PlayerState {
+  objectId: number;
+  name: string;
+  x: number;
+  y: number;
+  z: number;
+  hp: number;
+  mp: number;
+  level: number;
+  classId: number;
+  raceId: number;
+}
+
+/** A world object (NPC / monster) we render as a marker. */
+export interface WorldEntity {
+  objectId: number;
+  displayId: number; // npc template id (displayId - 1000000)
+  x: number;
+  y: number;
+  z: number;
+  heading: number;
 }
 
 export type GameEvent =
@@ -34,8 +54,12 @@ export type GameEvent =
   | { type: "key-ok" }
   | { type: "characters"; chars: GameCharacter[] }
   | { type: "char-selected"; name: string; objectId: number; x: number; y: number; z: number }
+  | { type: "player"; player: PlayerState }
   | { type: "in-world"; message: string }
   | { type: "world-packet"; opcode: number; length: number }
+  | { type: "npc-spawn"; entity: WorldEntity }
+  | { type: "npc-move"; objectId: number; x: number; y: number; z: number }
+  | { type: "npc-remove"; objectId: number }
   | { type: "error"; error: string }
   | { type: "closed" };
 
@@ -49,16 +73,17 @@ export interface GameLoginOptions {
   playKey1: number;
   playKey2: number;
   bridgeUrl?: string;
-  /** Keep the TCP socket open after the roster (needed to enter world). */
   keepAlive?: boolean;
   onEvent?: (ev: GameEvent) => void;
 }
 
-// CharSelectionInfo per-char "tail": bytes from the end of `level` to the end
-// of one character's block. Constant per server build (only name/accountName
-// vary, and those are read explicitly). 12.3 source = 519; slave.gr = 495.
-//   tail = bodyLen - 17(header) - 122(prefix incl strings up to level)
+// CharSelectionInfo per-char tail (slave.gr build). See reference doc.
 const CHAR_TAIL_AFTER_LEVEL = 495;
+
+// Server opcodes we parse in the world phase.
+const OP_NPC_INFO = 0x0c;
+const OP_DELETE_OBJECT = 0x08;
+const OP_MOVE_TO_LOCATION = 0x2f;
 
 type Phase = "auth" | "roster" | "selecting" | "entering" | "in-world";
 
@@ -84,11 +109,16 @@ export class L2GameClient {
   private rxBuffer = new Uint8Array(0);
   private gotKey = false;
   private phase: Phase = "auth";
-  private resolved = false; // start() promise resolved
+  private resolved = false;
   private resolve!: (ev: GameEvent) => void;
   private opts: GameLoginOptions;
   private authTimer: ReturnType<typeof setTimeout> | null = null;
   private chars: GameCharacter[] = [];
+
+  // ── world entity layer ──
+  private listeners = new Set<(ev: GameEvent) => void>();
+  private _player: PlayerState | null = null;
+  private _entities = new Map<number, WorldEntity>();
 
   constructor(opts: GameLoginOptions) {
     this.opts = opts;
@@ -109,7 +139,7 @@ export class L2GameClient {
       ws.onopen = () => this.emit({ type: "status", message: "[GS] WebSocket open" });
       ws.onclose = (ev) => {
         if (!this.resolved) this.finish({ type: "closed" }, `[GS] closed code=${ev.code} reason=${ev.reason}`);
-        else this.emit({ type: "status", message: `[GS] socket closed (${ev.code})` });
+        else this.emit({ type: "closed" });
       };
       ws.onerror = () => {
         if (!this.resolved) this.finish({ type: "error", error: "[GS] WebSocket error" });
@@ -118,7 +148,6 @@ export class L2GameClient {
     });
   }
 
-  /** Disconnect explicitly (e.g. when leaving the world). */
   disconnect() {
     if (this.authTimer) clearTimeout(this.authTimer);
     try {
@@ -136,23 +165,42 @@ export class L2GameClient {
     return !!this.ws && this.ws.readyState === WebSocket.OPEN;
   }
 
-  /** Re-point the event handler (e.g. when a new route mounts). */
+  // ── entity accessors (for the viewport) ──
+  getPlayer(): PlayerState | null {
+    return this._player;
+  }
+  getEntities(): WorldEntity[] {
+    return Array.from(this._entities.values());
+  }
+
+  /** Subscribe to events without clobbering the primary handler. Returns an unsubscribe fn. */
+  addListener(cb: (ev: GameEvent) => void): () => void {
+    this.listeners.add(cb);
+    return () => this.listeners.delete(cb);
+  }
+
+  /** Re-point the primary event handler (legacy single-handler API). */
   setEventHandler(cb: (ev: GameEvent) => void) {
     this.opts.onEvent = cb;
   }
 
   private emit(ev: GameEvent) {
     this.opts.onEvent?.(ev);
+    for (const l of this.listeners) {
+      try {
+        l(ev);
+      } catch {
+        /* ignore listener errors */
+      }
+    }
   }
 
-  /** Resolve the start() promise (once). Does NOT close the socket. */
   private resolveOnce(ev: GameEvent) {
     if (this.resolved) return;
     this.resolved = true;
     this.resolve(ev);
   }
 
-  /** Terminal failure: resolve (if pending) AND close the socket. */
   private finish(ev: GameEvent, statusOnSettle?: string) {
     if (statusOnSettle) this.emit({ type: "status", message: statusOnSettle });
     this.emit(ev);
@@ -208,18 +256,21 @@ export class L2GameClient {
     const body = this.useEncryption && this.crypt ? this.crypt.decrypt(rawBody) : rawBody;
     const opcode = body[0];
 
-    // Once in the world, just log everything — full world-state parsing is a
-    // later milestone (UserInfo, NpcInfo, etc.).
     if (this.phase === "entering" || this.phase === "in-world") {
       if (this.phase === "entering") {
         this.phase = "in-world";
         this.emit({ type: "in-world", message: "[GS] EnterWorld accepted — receiving world state" });
       }
       this.emit({ type: "world-packet", opcode, length: body.length });
-      this.emit({
-        type: "status",
-        message: `[GS] (world) ← op 0x${opcode.toString(16).padStart(2, "0")} (${body.length}B)`,
-      });
+      // Parse the handful of packets that move the world. Everything else is
+      // ignored for now (chat, skills, inventory, ExPackets…).
+      try {
+        if (opcode === OP_NPC_INFO) this.parseNpcInfo(body);
+        else if (opcode === OP_MOVE_TO_LOCATION) this.parseMoveToLocation(body);
+        else if (opcode === OP_DELETE_OBJECT) this.parseDeleteObject(body);
+      } catch {
+        /* one bad packet shouldn't kill the stream */
+      }
       return;
     }
 
@@ -229,7 +280,6 @@ export class L2GameClient {
     });
 
     if (opcode === 0x09 && this.phase !== "selecting") {
-      // CharSelectionInfo (roster)
       if (this.authTimer) {
         clearTimeout(this.authTimer);
         this.authTimer = null;
@@ -237,14 +287,11 @@ export class L2GameClient {
       this.parseCharSelectionInfo(body);
       return;
     }
-
     if (opcode === 0x0b && this.phase === "selecting") {
-      // CharSelected → proceed to EnterWorld
       this.parseCharSelected(body);
       this.sendEnterWorld();
       return;
     }
-    // else: ignore (system messages, ExSendManorList 0x0A, etc.)
   }
 
   private handleKeyPacket(body: Uint8Array) {
@@ -336,17 +383,12 @@ export class L2GameClient {
     this.sendFrame(body, this.useEncryption);
   }
 
-  /**
-   * Select a character by roster slot (0-based) and enter the world.
-   * Must be called after start() resolved with { type: "characters" }.
-   */
   selectCharacter(slot: number) {
     if (!this.connected) {
       this.emit({ type: "error", error: "[GS] not connected — cannot select character" });
       return;
     }
     this.phase = "selecting";
-    // CharacterSelect (0x12): int charSlot, short, int, int, int
     const body = new PacketWriter().u8(0x12).u32(slot).u16(0).u32(0).u32(0).u32(0).build();
     this.emit({ type: "status", message: `[GS] → CharacterSelect slot=${slot}` });
     this.sendFrame(body, this.useEncryption);
@@ -354,44 +396,42 @@ export class L2GameClient {
 
   private sendEnterWorld() {
     this.phase = "entering";
-    // EnterWorld (0x11): 5×4 tracert bytes + 4 ints + 64-byte blob + 1 int.
-    // The server reads but does not validate the contents → all zeros is fine.
     const body = new PacketWriter().u8(0x11).bytes(new Uint8Array(104)).build();
     this.emit({ type: "status", message: "[GS] → EnterWorld" });
     this.sendFrame(body, this.useEncryption);
   }
 
-  // ===== Parsing =====
+  // ===== Parsing: roster =====
 
   private parseCharSelectionInfo(body: Uint8Array) {
     try {
       const r = new PacketReader(body);
-      r.u8(); // opcode 0x09
+      r.u8();
       const count = r.u32();
       if (count > 32) {
         this.finish({ type: "error", error: `[GS] implausible char count: ${count}` });
         return;
       }
-      r.skip(12); // header: maxChars(4)+byte+byte+int(4)+byte+byte
+      r.skip(12);
 
       const chars: GameCharacter[] = [];
       for (let i = 0; i < count; i++) {
         const name = r.str();
         const objectId = r.u32();
-        r.str(); // accountName
-        r.u32(); // sessionId
-        r.u32(); // clanId
-        r.u32(); // builderLevel
-        r.u32(); // sex
+        r.str();
+        r.u32();
+        r.u32();
+        r.u32();
+        r.u32();
         const race = r.u32();
         const baseClass = r.u32();
-        r.u32(); // serverId
-        r.skip(12); // x,y,z
-        r.skip(8); // hp
-        r.skip(8); // mp
-        r.skip(8); // sp (long)
-        r.skip(8); // exp (long)
-        r.skip(8); // expPercent (double)
+        r.u32();
+        r.skip(12);
+        r.skip(8);
+        r.skip(8);
+        r.skip(8);
+        r.skip(8);
+        r.skip(8);
         const level = r.u32();
 
         chars.push({
@@ -405,13 +445,7 @@ export class L2GameClient {
 
         if (i < count - 1) {
           r.skip(CHAR_TAIL_AFTER_LEVEL);
-          if (r.remaining < 0) {
-            this.emit({
-              type: "status",
-              message: `[GS] char #${i} tail overran — CHAR_TAIL_AFTER_LEVEL needs tuning`,
-            });
-            break;
-          }
+          if (r.remaining < 0) break;
         }
       }
 
@@ -420,21 +454,18 @@ export class L2GameClient {
       this.emit({ type: "status", message: `[GS] parsed ${chars.length} character(s)` });
       this.emit({ type: "characters", chars });
       this.resolveOnce({ type: "characters", chars });
-
-      // If keepAlive is false, behave like before and close.
       if (!this.opts.keepAlive) this.disconnect();
     } catch (err) {
-      this.finish({
-        type: "error",
-        error: `[GS] CharSelectionInfo parse failed: ${(err as Error).message}`,
-      });
+      this.finish({ type: "error", error: `[GS] CharSelectionInfo parse failed: ${(err as Error).message}` });
     }
   }
+
+  // ===== Parsing: player =====
 
   private parseCharSelected(body: Uint8Array) {
     try {
       const r = new PacketReader(body);
-      r.u8(); // opcode 0x0b
+      r.u8(); // 0x0b
       const name = r.str();
       const objectId = r.u32();
       r.str(); // title
@@ -442,17 +473,75 @@ export class L2GameClient {
       r.u32(); // clanId
       r.u32(); // 0
       r.u32(); // isFemale
-      r.u32(); // race
-      r.u32(); // classId
+      const raceId = r.u32();
+      const classId = r.u32();
       r.u32(); // active
       const x = r.u32() | 0;
       const y = r.u32() | 0;
       const z = r.u32() | 0;
-      this.emit({ type: "status", message: `[GS] CharSelected "${name}" @ ${x},${y},${z}` });
+      const hp = r.f64();
+      const mp = r.f64();
+      r.u64(); // sp
+      r.u64(); // exp
+      const level = r.u32();
+
+      this._player = { objectId, name, x, y, z, hp, mp, level, classId, raceId };
+      this.emit({ type: "status", message: `[GS] CharSelected "${name}" @ ${x},${y},${z} Lv${level}` });
       this.emit({ type: "char-selected", name, objectId, x, y, z });
+      this.emit({ type: "player", player: this._player });
     } catch {
-      // Non-fatal: we still send EnterWorld regardless.
       this.emit({ type: "status", message: "[GS] CharSelected received (unparsed)" });
+    }
+  }
+
+  // ===== Parsing: world entities =====
+
+  /** NpcInfo (0x0C): masked packet — skip the mask/init/block headers to the position. */
+  private parseNpcInfo(body: Uint8Array) {
+    const r = new PacketReader(body);
+    r.u8(); // 0x0c
+    const objectId = r.u32();
+    r.u8(); // summon anim
+    r.u16(); // mask bit count (39)
+    r.skip(5); // _masks (5 bytes for 39 bits)
+    const initSize = r.u8();
+    r.skip(initSize); // init block (attackable + long + title)
+    r.u16(); // _blockSize
+    const displayId = (r.u32() | 0) - 1000000;
+    const x = r.u32() | 0;
+    const y = r.u32() | 0;
+    const z = r.u32() | 0;
+    const heading = r.u32() | 0;
+
+    const entity: WorldEntity = { objectId, displayId, x, y, z, heading };
+    this._entities.set(objectId, entity);
+    this.emit({ type: "npc-spawn", entity });
+  }
+
+  /** MoveToLocation (0x2F): objectId + dest(x,y,z) + src(x,y,z). */
+  private parseMoveToLocation(body: Uint8Array) {
+    const r = new PacketReader(body);
+    r.u8(); // 0x2f
+    const objectId = r.u32();
+    const x = r.u32() | 0;
+    const y = r.u32() | 0;
+    const z = r.u32() | 0;
+    const ent = this._entities.get(objectId);
+    if (ent) {
+      ent.x = x;
+      ent.y = y;
+      ent.z = z;
+      this.emit({ type: "npc-move", objectId, x, y, z });
+    }
+  }
+
+  /** DeleteObject (0x08): objectId + byte. */
+  private parseDeleteObject(body: Uint8Array) {
+    const r = new PacketReader(body);
+    r.u8(); // 0x08
+    const objectId = r.u32();
+    if (this._entities.delete(objectId)) {
+      this.emit({ type: "npc-remove", objectId });
     }
   }
 }
