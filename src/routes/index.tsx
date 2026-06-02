@@ -121,7 +121,7 @@ function Launcher() {
       }
       const [p1, p2] = playEv.playKey;
       const [k1, k2] = login.loginSessionKey;
-      const protocolRevision = INTERLUDE_GAME_PROTOCOL;
+      const protocolRevision = GAME_PROTOCOL;
       // Login server connection is no longer needed.
       login.close();
 
