@@ -30,6 +30,7 @@ export function WorldViewport() {
     textures: number;
     meshes: number;
   } | null>(null);
+  const [mapInfo, setMapInfo] = useState<{ path: string; actors: number; spawns: number } | null>(null);
 
   useEffect(() => {
     const mount = mountRef.current;
