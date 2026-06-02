@@ -421,5 +421,29 @@ export class L2LoginClient {
     this.emit({ type: "status", message: "Sending RequestPIAgreement(accept=1)" });
     this.sendFrame(body);
   }
+
+  /**
+   * After start() resolves with server-list, call this to request play
+   * permission for a specific server. Resolves with play-ok (carrying
+   * sessionKey2) or login-fail. Keeps WS open on success; caller MUST call
+   * close() once the keys are extracted.
+   */
+  selectServer(serverId: number): Promise<LoginEvent> {
+    return new Promise((resolve) => {
+      this.playResolve = resolve;
+      const body = new PacketWriter()
+        .u8(0x02)
+        .u32(this.loginKey1[0])
+        .u32(this.loginKey1[1])
+        .u8(serverId)
+        .build();
+      this.emit({ type: "status", message: `Sending RequestServerLogin(server=${serverId})` });
+      this.sendFrame(body);
+    });
+  }
+
+  close() {
+    try { this.ws?.close(); } catch { /* ignore */ }
+  }
 }
 
