@@ -156,6 +156,7 @@ function CdnCachePage() {
 
   useEffect(() => {
     refreshAll();
+    refreshMount();
   }, []);
 
   async function runPrefetch(targets: string[]) {
