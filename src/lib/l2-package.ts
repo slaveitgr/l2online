@@ -45,6 +45,15 @@ export interface UExport {
   size: number;
   offset: number;
 }
+export type L2TextureFormat = "DXT1" | "DXT3" | "DXT5" | "RGBA8" | "P8" | "G16" | "unknown";
+export interface L2Texture {
+  name: string;
+  width: number;
+  height: number;
+  format: L2TextureFormat;
+  /** Top-mip pixel data. For DXT* this is the compressed block data (upload as CompressedTexture). */
+  data: Uint8Array;
+}
 export interface StaticMeshGeometry {
   name: string;
   positions: Float32Array; // xyz per vertex
@@ -224,6 +233,88 @@ export class L2Package {
   /** Find an export by object name (e.g. a StaticMesh). */
   findExport(name: string): UExport | undefined {
     return this.exports.find((e) => e.objectName === name);
+  }
+
+  /**
+   * Read a Texture's top mipmap → {width, height, format, data}.
+   * Validated against Aden_blazingswampstone_T.utx (lavastone2 DXT3 decoded).
+   * UE2 format ids: 0=P8 3=DXT1 5=RGBA8 7=DXT3 8=DXT5 10=G16.
+   * The L2 mip container has a "0x100" lazy-storage quirk, so we locate the top
+   * mip robustly: its byte length = USize*VSize (×bpp), found as a compat32 in
+   * the serial range. Returns compressed DXT data for a three.js CompressedTexture.
+   */
+  readTexture(nameOrExport: string | UExport): L2Texture | null {
+    const e = typeof nameOrExport === "string" ? this.findExport(nameOrExport) : nameOrExport;
+    if (!e || e.size <= 0) return null;
+    const b = this.bytes;
+    const dv = this.dv;
+    const cur = { o: e.offset };
+    const ci = () => {
+      const [v, s] = readCompat32(b, cur.o);
+      cur.o += s;
+      return v;
+    };
+    const u8 = () => b[cur.o++];
+    const u16 = () => {
+      const v = dv.getUint16(cur.o, true);
+      cur.o += 2;
+      return v;
+    };
+
+    if (e.flags & RF_HAS_STACK) {
+      const nid = ci();
+      ci();
+      cur.o += 12;
+      if (nid !== 0) ci();
+    }
+
+    let fmtId = -1,
+      uSize = 0,
+      vSize = 0,
+      guard = 0;
+    for (;;) {
+      if (guard++ > 400) break;
+      const ni = ci();
+      const nm = this.nm(ni);
+      if (nm === "None") break;
+      const info = u8();
+      const ptype = info & 0x0f,
+        szc = info & 0x70,
+        isArray = info & 0x80;
+      if (ptype === PT_STRUCT) ci();
+      let dsz: number;
+      if (szc in STATIC_SIZES) dsz = STATIC_SIZES[szc];
+      else if (szc === 0x50) dsz = u8();
+      else if (szc === 0x60) dsz = u16();
+      else if (szc === 0x70) {
+        dsz = dv.getUint32(cur.o, true);
+        cur.o += 4;
+      } else dsz = 0;
+      if (isArray && ptype !== PT_BOOL) u8();
+      if (ptype === PT_BOOL) continue;
+      if (nm === "Format") fmtId = b[cur.o];
+      else if (nm === "USize") uSize = dv.getInt32(cur.o, true);
+      else if (nm === "VSize") vSize = dv.getInt32(cur.o, true);
+      cur.o += dsz;
+    }
+
+    const fmtMap: Record<number, L2TextureFormat> = { 0: "P8", 3: "DXT1", 5: "RGBA8", 7: "DXT3", 8: "DXT5", 10: "G16" };
+    const format = fmtMap[fmtId] ?? "unknown";
+    if (!uSize || !vSize) return null;
+    const bpp = format === "DXT1" ? 0.5 : format === "RGBA8" ? 4 : format === "G16" ? 2 : 1;
+    const topLen = Math.floor(uSize * vSize * bpp);
+
+    const end = e.offset + e.size;
+    let dataOff = -1;
+    for (let o = cur.o; o < end - 8; o++) {
+      const [v, s] = readCompat32(b, o);
+      if (v === topLen && o + s + topLen <= end) {
+        dataOff = o + s;
+        break;
+      }
+    }
+    if (dataOff < 0) return null;
+    return { name: e.objectName, width: uSize, height: vSize, format, data: b.slice(dataOff, dataOff + topLen) };
   }
 
   /**
