@@ -53,7 +53,7 @@ function WorldPage() {
       <header className="border-b border-border/60 px-4 py-2 flex items-center justify-between bg-background/80 backdrop-blur z-10">
         <Link to="/characters" className="flex items-center gap-3 group">
           <div className="w-7 h-7 rounded-sm bg-gradient-to-br from-primary to-blood flex items-center justify-center font-display text-primary-foreground font-bold text-sm">L</div>
-          <div className="font-display text-gold text-sm tracking-widest group-hover:brightness-125 transition">LINEAGE II — WORLD</div>
+          <div className="font-display text-gold text-sm tracking-widest group-hover:brightness-125 transition">L2SLAVE — WORLD</div>
         </Link>
         <div className="flex items-center gap-3">
           <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-widest">
