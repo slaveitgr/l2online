@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { listFiles, getManifest, type CachedFileMeta } from "@/lib/l2-assets";
+import { listFiles, getManifest, getCacheStats, formatBytes, type CachedFileMeta } from "@/lib/l2-assets";
 
 /**
  * Phase 1 viewport.
