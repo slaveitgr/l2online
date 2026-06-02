@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { GameCharacter } from "@/lib/l2-protocol/game-client";
 
 export const Route = createFileRoute("/characters")({
   head: () => ({
@@ -11,43 +12,52 @@ export const Route = createFileRoute("/characters")({
   component: Characters,
 });
 
-interface Char {
-  id: string;
-  name: string;
-  klass: string;
-  level: number;
-  race: string;
-  color: string;
-}
-
-const CHARS: Char[] = [
-  { id: "c1", name: "Vesperion", klass: "Phoenix Knight", level: 78, race: "Human", color: "oklch(0.55 0.15 30)" },
-  { id: "c2", name: "Lyrael", klass: "Eva's Saint", level: 76, race: "Elf", color: "oklch(0.6 0.12 160)" },
-  { id: "c3", name: "Drakhar", klass: "Soultaker", level: 81, race: "Dark Elf", color: "oklch(0.45 0.18 310)" },
-];
+type Char = GameCharacter;
 
 function Characters() {
   const navigate = useNavigate();
-  const [selected, setSelected] = useState(CHARS[0].id);
+  const [chars, setChars] = useState<Char[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("l2_characters");
+      const parsed: Char[] = raw ? JSON.parse(raw) : [];
+      setChars(parsed);
+      setSelected(parsed[0]?.id ?? null);
+    } catch { /* ignore */ }
+  }, []);
+
+  if (chars.length === 0) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-8 text-center">
+        <p className="font-display text-gold text-xl tracking-widest">NO CHARACTERS LOADED</p>
+        <p className="text-sm text-muted-foreground max-w-md">
+          Sign in and select a game server from the launcher to load your roster.
+        </p>
+        <Link to="/" className="text-xs px-4 py-2 border border-gold/40 rounded text-gold hover:bg-gold/10 transition">← Back to launcher</Link>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
       <header className="border-b border-border/60 px-6 py-3 flex items-center justify-between">
-        <Link to="/select-files" className="flex items-center gap-3 group">
+        <Link to="/" className="flex items-center gap-3 group">
           <div className="w-8 h-8 rounded-sm bg-gradient-to-br from-primary to-blood flex items-center justify-center font-display text-primary-foreground font-bold">L</div>
           <div>
             <h1 className="font-display text-gold text-lg leading-none tracking-widest group-hover:brightness-125 transition">LINEAGE II</h1>
             <p className="text-[10px] text-muted-foreground tracking-[0.3em] uppercase">Character Select</p>
           </div>
         </Link>
-        <Link to="/select-files" className="text-xs text-muted-foreground hover:text-gold transition">← Back</Link>
+        <Link to="/" className="text-xs text-muted-foreground hover:text-gold transition">← Back</Link>
       </header>
 
       <main className="flex-1 grid lg:grid-cols-[420px_1fr]">
         {/* Roster */}
         <aside className="border-r border-border/60 p-6 space-y-3 overflow-y-auto">
-          <p className="text-gold/80 font-mono text-xs tracking-[0.4em] uppercase mb-4">Heroes — 3 / 7</p>
-          {CHARS.map((c) => {
+          <p className="text-gold/80 font-mono text-xs tracking-[0.4em] uppercase mb-4">Heroes — {chars.length} / 7</p>
+          {chars.map((c) => {
             const active = c.id === selected;
             return (
               <button
@@ -81,7 +91,7 @@ function Characters() {
           <div className="absolute inset-0 bg-gradient-to-br from-blood/20 via-background to-background" />
           <div className="relative z-10 text-center">
             {(() => {
-              const c = CHARS.find((x) => x.id === selected)!;
+              const c = chars.find((x) => x.id === selected) ?? chars[0];
               return (
                 <>
                   <div

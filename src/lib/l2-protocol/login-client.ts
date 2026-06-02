@@ -54,6 +54,7 @@ export type LoginEvent =
   | { type: "login-ok"; sessionKey1: [number, number]; sessionKey2: [number, number] }
   | { type: "login-fail"; reason: string; code: number }
   | { type: "server-list"; servers: GameServer[] }
+  | { type: "play-ok"; playKey: [number, number] }
   | { type: "raw"; direction: "in" | "out"; bytes: Uint8Array; opcode: number }
   | { type: "error"; error: string }
   | { type: "closed" };
@@ -110,10 +111,16 @@ export class L2LoginClient {
   private resolve!: (ev: LoginEvent) => void;
   private settled = false;
   private opts: LoginOptions;
+  private loginKey1: [number, number] = [0, 0];
+  // Continuation promise installed by selectServer() to receive PlayOk.
+  private playResolve: ((ev: LoginEvent) => void) | null = null;
 
   constructor(opts: LoginOptions) {
     this.opts = opts;
   }
+
+  get protocol(): number { return this.protocolRevision; }
+  get loginSessionKey(): [number, number] { return this.loginKey1; }
 
   /** Returns the terminal event (login-ok+server-list, login-fail, error, or closed). */
   start(): Promise<LoginEvent> {
@@ -267,6 +274,7 @@ export class L2LoginClient {
         r.u8();
         const k1a = r.u32();
         const k1b = r.u32();
+        this.loginKey1 = [k1a, k1b];
         this.emit({ type: "login-ok", sessionKey1: [k1a, k1b], sessionKey2: [0, 0] });
         this.sendRequestServerList(k1a, k1b);
         return;
@@ -302,11 +310,32 @@ export class L2LoginClient {
           const brackets = r.u8() !== 0;
           servers.push({ id, ip, port, ageLimit, pvp, currentPlayers, maxPlayers, status, type, brackets });
         }
-        this.settle({ type: "server-list", servers });
+        // Emit + RESOLVE start() promise. Keep WS open so the caller may
+        // chain selectServer() to obtain PlayOk on the same connection.
+        this.emit({ type: "server-list", servers });
+        if (!this.settled) {
+          this.settled = true;
+          this.resolve({ type: "server-list", servers });
+        }
+        return;
+      }
+      case 0x07: {
+        // PlayOk: opcode + playKey1 + playKey2 (some chronicles swap order;
+        // Mobius uses playKey1=u32 then playKey2=u32).
+        const r = new PacketReader(body);
+        r.u8();
+        const p1 = r.u32();
+        const p2 = r.u32();
+        const ev: LoginEvent = { type: "play-ok", playKey: [p1, p2] };
+        this.emit(ev);
+        this.playResolve?.(ev);
+        this.playResolve = null;
         return;
       }
       case 0x06: {
-        this.settle({ type: "login-fail", reason: "Play failed (server rejected)", code: 0x06 });
+        const ev: LoginEvent = { type: "login-fail", reason: "Play failed (server rejected)", code: 0x06 };
+        if (this.playResolve) { this.playResolve(ev); this.playResolve = null; this.emit(ev); }
+        else this.settle(ev);
         return;
       }
       case 0x0d: {
@@ -391,6 +420,30 @@ export class L2LoginClient {
       .build();
     this.emit({ type: "status", message: "Sending RequestPIAgreement(accept=1)" });
     this.sendFrame(body);
+  }
+
+  /**
+   * After start() resolves with server-list, call this to request play
+   * permission for a specific server. Resolves with play-ok (carrying
+   * sessionKey2) or login-fail. Keeps WS open on success; caller MUST call
+   * close() once the keys are extracted.
+   */
+  selectServer(serverId: number): Promise<LoginEvent> {
+    return new Promise((resolve) => {
+      this.playResolve = resolve;
+      const body = new PacketWriter()
+        .u8(0x02)
+        .u32(this.loginKey1[0])
+        .u32(this.loginKey1[1])
+        .u8(serverId)
+        .build();
+      this.emit({ type: "status", message: `Sending RequestServerLogin(server=${serverId})` });
+      this.sendFrame(body);
+    });
+  }
+
+  close() {
+    try { this.ws?.close(); } catch { /* ignore */ }
   }
 }
 
