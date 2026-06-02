@@ -188,14 +188,11 @@ export class L2GameClient {
     // varies by chronicle (0x09 classic/HF, 0x13 retail GoD, 0x67 Mobius
     // Superion ex-packet). We try the most common ones.
     switch (opcode) {
-      case 0x09:
-      case 0x13:
-      case 0x67: {
+      case 0x09: {
         this.parseCharSelectionInfo(body);
         return;
       }
       default: {
-        // Just log; many chronicles send pings / system msgs we can ignore.
         return;
       }
     }
