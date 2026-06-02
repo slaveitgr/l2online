@@ -1,24 +1,24 @@
-## Fix
+## Goal
+Το Protocol log χάνεται όταν το `onEnterWorld` κάνει `navigate({ to: "/characters" })`. Θέλουμε να το κρατάμε ώστε να μπορεί ο χρήστης να το δει/κάνει copy μετά το redirect.
+
+## Changes
 
 ### 1) `src/routes/index.tsx`
-- Line 9: `const INTERLUDE_GAME_PROTOCOL = 746;` → `const GAME_PROTOCOL = 502;` (Mobius 12.3 Superion)
-- Line 124: replace `INTERLUDE_GAME_PROTOCOL` usage with `GAME_PROTOCOL`
+- Στους `onEvent` handlers του login και του game client πρόσθεσε `console.log("[LS]", ev)` / `console.log("[GS]", ev)` ώστε το log να επιβιώνει στο DevTools Console (το SPA navigate δεν κάνει reload).
+- Κράτα ένα τοπικό `logBuf: string[]` που γεμίζει σε κάθε `pushStatus` (ή στους handlers απευθείας). Πριν το `navigate({ to: "/characters" })` στο `onEnterWorld`:
+  ```ts
+  sessionStorage.setItem("l2_gslog", JSON.stringify(statusLog));
+  ```
+  Επίσης σε error path (όταν `gr.type === "error"` ή `"closed"`) — να σώζεται κι εκεί για debugging.
 
-### 2) `src/lib/l2-protocol/game-client.ts` — KeyPacket result check
-Στο handler του opcode `0x2e`, διάβασε το `result` byte (`body[1]`) και αν είναι `!== 0x01`, κάνε `settle({ type: "error", error: ... })` με καθαρό μήνυμα:
-`Server rejected protocol <N> (KeyPacket result=0). Expected 502.`
-Αυτό αντικαθιστά το σιωπηλό `tcp-eof` με readable error.
+### 2) `src/routes/characters.tsx`
+- Πρόσθεσε ένα collapsible `<details>` panel «Protocol log» στο τέλος της σελίδας που διαβάζει `sessionStorage.getItem("l2_gslog")` και το εμφανίζει σε `<pre>` (ίδιο styling με το launcher panel).
+- Έτσι ο χρήστης βλέπει τα `[GS] ← op 0x09 ...`, `[GS] parsed N character(s)` κ.λπ. ακόμα και μετά το redirect, και μπορεί να τα κάνει copy.
 
-### Out of scope
-Login server / GameCrypt / AuthLogin / CharSelectionInfo parser μένουν ως έχουν. Ο parser του 502 layout που μπήκε στο προηγούμενο βήμα θα δοκιμαστεί μόλις περάσει το KeyPacket με `result=1`.
+## Out of scope
+Καμία αλλαγή σε protocol/parser logic. Καθαρά παρουσίαση/persistence του log.
 
-### Verification
-Log πρέπει να δείξει:
-```
-[GS] → ProtocolVersion 0x1f6        (= 502)
-[GS] ← key 26B 2e 01 ...             (result byte = 0x01)
-[GS] cipher ok=1 seed=...
-[GS] → AuthLogin user="mslave"
-[GS] ← op 0x09 ...
-[GS] parsed N character(s)
-```
+## Verification
+1. Login → ENTER WORLD.
+2. Στο `/characters`, άνοιγμα του «Protocol log» panel → φαίνεται όλη η ροή από `[GS] encryption=OFF seed=...` έως `[GS] parsed N character(s)`.
+3. Εναλλακτικά, DevTools Console με «Preserve log» δείχνει τα ίδια events.
