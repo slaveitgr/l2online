@@ -9,6 +9,7 @@ import {
   type PrefetchProgress,
 } from "@/lib/l2-assets";
 import { loadManifest, summarizeFolders, type FolderSummary, type ManifestFile } from "@/lib/cdn-manifest";
+import { getMountStatus, pickFolder, unmount, type MountStatus } from "@/lib/local-mount";
 
 interface RangeTestResult {
   file: string;
