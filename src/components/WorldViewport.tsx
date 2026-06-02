@@ -1,21 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { listFiles, getManifest, getCacheStats, formatBytes, type CachedFileMeta } from "@/lib/l2-assets";
+import { getGameConnection, type GameEvent, type WorldEntity } from "@/lib/l2-protocol/game-client";
 
 /**
- * Phase 1 viewport.
+ * Phase 1.5 viewport.
  *
- * Renders a placeholder Lineage 2 scene with three.js: a heightmapped terrain,
- * atmospheric fog, dynamic lighting, and orbit camera controls.
- *
- * The asset loader hooks below read cached client files from IndexedDB and
- * report what was found. Actual parsing of Unreal .unr / .utx packages is the
- * Phase 2 deliverable — see realratchet/Lineage2JS for the loader port.
+ * Placeholder terrain + LIVE world entities driven by the game connection:
+ * the player sits at the scene origin, NPCs/monsters are rendered as markers at
+ * their real L2 coordinates (relative to the player, scaled down). Spawns,
+ * moves and despawns stream in from NpcInfo(0x0C)/MoveToLocation(0x2F)/
+ * DeleteObject(0x08). Authentic UE2 asset rendering is the next milestone.
  */
+
+// L2 units → scene units. Lower = more zoomed in. ~3000 units → 100 scene units.
+const SCALE = 30;
+
 export function WorldViewport() {
   const mountRef = useRef<HTMLDivElement>(null);
   const [fps, setFps] = useState(0);
-  const [pos, setPos] = useState({ x: 0, y: 0, z: 0 });
+  const [worldPos, setWorldPos] = useState<{ x: number; y: number; z: number } | null>(null);
+  const [entityCount, setEntityCount] = useState(0);
   const [loadStatus, setLoadStatus] = useState("Initializing…");
   const [assetSummary, setAssetSummary] = useState<{
     rootName: string;
@@ -31,16 +36,9 @@ export function WorldViewport() {
     // ── Scene ────────────────────────────────────────────────────────────
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x1a0f0a);
-    scene.fog = new THREE.FogExp2(0x2a1a14, 0.008);
+    scene.fog = new THREE.FogExp2(0x2a1a14, 0.006);
 
-    const camera = new THREE.PerspectiveCamera(
-      60,
-      mount.clientWidth / mount.clientHeight,
-      0.1,
-      2000,
-    );
-    camera.position.set(60, 45, 60);
-    camera.lookAt(0, 0, 0);
+    const camera = new THREE.PerspectiveCamera(60, mount.clientWidth / mount.clientHeight, 0.1, 3000);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -52,98 +50,119 @@ export function WorldViewport() {
     mount.appendChild(renderer.domElement);
 
     // ── Lighting ─────────────────────────────────────────────────────────
-    const ambient = new THREE.AmbientLight(0x442a1c, 0.6);
-    scene.add(ambient);
-
+    scene.add(new THREE.AmbientLight(0x442a1c, 0.7));
     const sun = new THREE.DirectionalLight(0xffd28a, 1.2);
     sun.position.set(80, 120, 40);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
-    sun.shadow.camera.left = -120;
-    sun.shadow.camera.right = 120;
-    sun.shadow.camera.top = 120;
-    sun.shadow.camera.bottom = -120;
+    Object.assign(sun.shadow.camera, { left: -150, right: 150, top: 150, bottom: -150 });
     scene.add(sun);
-
     const rim = new THREE.DirectionalLight(0x6080ff, 0.3);
     rim.position.set(-50, 30, -50);
     scene.add(rim);
 
-    // ── Terrain (placeholder heightmap) ──────────────────────────────────
-    const terrainGeom = new THREE.PlaneGeometry(200, 200, 80, 80);
+    // ── Ground (placeholder heightmap) ───────────────────────────────────
+    const terrainGeom = new THREE.PlaneGeometry(400, 400, 80, 80);
     terrainGeom.rotateX(-Math.PI / 2);
-    const pos2 = terrainGeom.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < pos2.count; i++) {
-      const x = pos2.getX(i);
-      const z = pos2.getZ(i);
-      const h =
-        Math.sin(x * 0.05) * 3 +
-        Math.cos(z * 0.07) * 2.5 +
-        Math.sin((x + z) * 0.03) * 4 +
-        (Math.random() - 0.5) * 0.4;
-      pos2.setY(i, h);
+    const tp = terrainGeom.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < tp.count; i++) {
+      const x = tp.getX(i);
+      const z = tp.getZ(i);
+      const h = Math.sin(x * 0.04) * 3 + Math.cos(z * 0.05) * 2.5 + Math.sin((x + z) * 0.02) * 4;
+      tp.setY(i, h);
     }
     terrainGeom.computeVertexNormals();
-
-    const terrainMat = new THREE.MeshStandardMaterial({
-      color: 0x4a3522,
-      roughness: 0.9,
-      metalness: 0.0,
-      flatShading: false,
-    });
+    const terrainMat = new THREE.MeshStandardMaterial({ color: 0x4a3522, roughness: 0.95 });
     const terrain = new THREE.Mesh(terrainGeom, terrainMat);
     terrain.receiveShadow = true;
     scene.add(terrain);
 
-    // Stone monolith ring (placeholder for a "spawn" landmark)
-    for (let i = 0; i < 8; i++) {
-      const angle = (i / 8) * Math.PI * 2;
-      const r = 12;
-      const stone = new THREE.Mesh(
-        new THREE.BoxGeometry(2, 6 + Math.random() * 2, 1.5),
-        new THREE.MeshStandardMaterial({ color: 0x6a6055, roughness: 0.85 }),
-      );
-      stone.position.set(Math.cos(angle) * r, 3, Math.sin(angle) * r);
-      stone.rotation.y = angle + (Math.random() - 0.5) * 0.3;
-      stone.castShadow = true;
-      stone.receiveShadow = true;
-      scene.add(stone);
-    }
+    // ── Live entity layer ────────────────────────────────────────────────
+    const conn = getGameConnection();
+    const player = conn?.getPlayer();
+    // Scene origin = the player's world position (everything is relative to it).
+    const origin = player ? { x: player.x, y: player.y, z: player.z } : { x: 0, y: 0, z: 0 };
+    setWorldPos(origin);
 
-    // Glowing brazier in center
-    const brazier = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.2, 1.8, 1, 12),
-      new THREE.MeshStandardMaterial({ color: 0x3a2418, roughness: 0.7 }),
+    // L2 (x east, y north, z up) → three (x right, y up, z south).
+    const toScene = (wx: number, wy: number, wz: number) =>
+      new THREE.Vector3((wx - origin.x) / SCALE, (wz - origin.z) / SCALE, (wy - origin.y) / SCALE);
+
+    // Player marker
+    const playerMesh = new THREE.Mesh(
+      new THREE.ConeGeometry(1.1, 3.4, 8),
+      new THREE.MeshStandardMaterial({ color: 0x3fb6a8, emissive: 0x16403a, roughness: 0.4 }),
     );
-    brazier.position.y = 0.5;
-    brazier.castShadow = true;
-    scene.add(brazier);
+    playerMesh.position.set(0, 1.7, 0);
+    playerMesh.castShadow = true;
+    scene.add(playerMesh);
 
-    const flame = new THREE.PointLight(0xff9040, 8, 25, 2);
-    flame.position.set(0, 2, 0);
-    flame.castShadow = true;
-    scene.add(flame);
-
-    const flameSphere = new THREE.Mesh(
-      new THREE.SphereGeometry(0.8, 16, 16),
-      new THREE.MeshBasicMaterial({ color: 0xffaa55 }),
+    const playerRing = new THREE.Mesh(
+      new THREE.RingGeometry(2.2, 2.6, 32),
+      new THREE.MeshBasicMaterial({ color: 0x3fb6a8, side: THREE.DoubleSide, transparent: true, opacity: 0.5 }),
     );
-    flameSphere.position.y = 2;
-    scene.add(flameSphere);
+    playerRing.rotation.x = -Math.PI / 2;
+    playerRing.position.y = 0.1;
+    scene.add(playerRing);
 
-    // ── Orbit camera (minimal custom controls — no OrbitControls dep) ────
+    // NPC markers (shared geometry/material)
+    const npcGeom = new THREE.ConeGeometry(0.8, 2.4, 6);
+    const npcMat = new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.6 });
+    const entityMeshes = new Map<number, THREE.Mesh>();
+
+    const upsert = (e: WorldEntity) => {
+      let m = entityMeshes.get(e.objectId);
+      if (!m) {
+        m = new THREE.Mesh(npcGeom, npcMat);
+        m.castShadow = true;
+        scene.add(m);
+        entityMeshes.set(e.objectId, m);
+      }
+      const p = toScene(e.x, e.y, e.z);
+      p.y += 1.2;
+      m.position.copy(p);
+    };
+    const remove = (objectId: number) => {
+      const m = entityMeshes.get(objectId);
+      if (m) {
+        scene.remove(m);
+        entityMeshes.delete(objectId);
+      }
+    };
+
+    // Render whatever already spawned during the enter-world burst.
+    conn?.getEntities().forEach(upsert);
+    setEntityCount(entityMeshes.size);
+
+    const unsub = conn?.addListener((ev: GameEvent) => {
+      if (ev.type === "npc-spawn") {
+        upsert(ev.entity);
+        setEntityCount(entityMeshes.size);
+      } else if (ev.type === "npc-move") {
+        const m = entityMeshes.get(ev.objectId);
+        if (m) {
+          const p = toScene(ev.x, ev.y, ev.z);
+          p.y += 1.2;
+          m.position.copy(p);
+        }
+      } else if (ev.type === "npc-remove") {
+        remove(ev.objectId);
+        setEntityCount(entityMeshes.size);
+      }
+    });
+
+    // ── Orbit camera (around the player at origin) ───────────────────────
     let theta = Math.PI / 4;
-    let phi = Math.PI / 3.5;
-    let radius = 90;
+    let phi = Math.PI / 3.2;
+    let radius = 70;
     let dragging = false;
     let lastX = 0;
     let lastY = 0;
-
     const updateCamera = () => {
       camera.position.x = Math.sin(phi) * Math.cos(theta) * radius;
       camera.position.z = Math.sin(phi) * Math.sin(theta) * radius;
-      camera.position.y = Math.cos(phi) * radius;
-      camera.lookAt(0, 0, 0);
+      camera.position.y = Math.cos(phi) * radius + 4;
+      camera.lookAt(0, 2, 0);
     };
     updateCamera();
 
@@ -155,12 +174,10 @@ export function WorldViewport() {
     };
     const onMove = (e: PointerEvent) => {
       if (!dragging) return;
-      const dx = e.clientX - lastX;
-      const dy = e.clientY - lastY;
+      theta -= (e.clientX - lastX) * 0.005;
+      phi = Math.max(0.15, Math.min(Math.PI / 2.1, phi - (e.clientY - lastY) * 0.005));
       lastX = e.clientX;
       lastY = e.clientY;
-      theta -= dx * 0.005;
-      phi = Math.max(0.15, Math.min(Math.PI / 2.1, phi - dy * 0.005));
       updateCamera();
     };
     const onUp = (e: PointerEvent) => {
@@ -169,7 +186,7 @@ export function WorldViewport() {
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      radius = Math.max(20, Math.min(250, radius + e.deltaY * 0.08));
+      radius = Math.max(15, Math.min(400, radius + e.deltaY * 0.08));
       updateCamera();
     };
     renderer.domElement.addEventListener("pointerdown", onDown);
@@ -177,7 +194,6 @@ export function WorldViewport() {
     renderer.domElement.addEventListener("pointerup", onUp);
     renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
 
-    // ── Resize ───────────────────────────────────────────────────────────
     const onResize = () => {
       camera.aspect = mount.clientWidth / mount.clientHeight;
       camera.updateProjectionMatrix();
@@ -191,19 +207,11 @@ export function WorldViewport() {
     let raf = 0;
     const tick = () => {
       const t = performance.now() * 0.001;
-      flame.intensity = 7 + Math.sin(t * 6) * 1.5 + Math.sin(t * 13) * 0.8;
-      flameSphere.scale.setScalar(1 + Math.sin(t * 8) * 0.08);
-
+      playerRing.scale.setScalar(1 + Math.sin(t * 3) * 0.04);
       renderer.render(scene, camera);
-
       frameCount++;
       if (performance.now() - lastFpsTime > 500) {
         setFps(Math.round((frameCount * 1000) / (performance.now() - lastFpsTime)));
-        setPos({
-          x: Math.round(camera.position.x),
-          y: Math.round(camera.position.y),
-          z: Math.round(camera.position.z),
-        });
         frameCount = 0;
         lastFpsTime = performance.now();
       }
@@ -214,37 +222,37 @@ export function WorldViewport() {
     // ── Asset loader hook (reads cached client) ──────────────────────────
     (async () => {
       setLoadStatus("Reading cached client…");
-      const [manifest, stats] = await Promise.all([getManifest(), getCacheStats().catch(() => null)]);
+      const [manifest, stats] = await Promise.all([getManifest().catch(() => null), getCacheStats().catch(() => null)]);
       const rootName = manifest?.rootName ?? "CDN cache";
-      const maps = await listFiles("maps");
-      const textures = (await listFiles("textures")).length;
-      const meshes = (await listFiles("staticmeshes")).length;
+      const maps = await listFiles("maps").catch(() => []);
+      const textures = (await listFiles("textures").catch(() => [])).length;
+      const meshes = (await listFiles("staticmeshes").catch(() => [])).length;
       setAssetSummary({ rootName, maps, textures, meshes });
-      if (stats && stats.cachedFiles > 0) {
+      if (stats && stats.cachedFiles > 0)
         setLoadStatus(
           `${stats.cachedFiles}/${stats.totalFiles} files cached · ${formatBytes(stats.cachedBytes)} · Phase 2 parser pending`,
         );
-      } else if (maps.length > 0) {
+      else if (maps.length > 0)
         setLoadStatus(`Found ${maps.length} maps · Lineage2JS loader integration pending (Phase 2)`);
-      } else {
-        setLoadStatus("No cached assets. Visit /cdn-cache to stream from CDN.");
-      }
-      // TODO Phase 2: instantiate Lineage2JS package reader here, decode
-      // the chosen .unr (e.g. 17_25.unr — Talking Island village), translate
-      // its actors into three.js meshes, and replace the placeholder terrain.
+      else setLoadStatus("No cached assets. Visit /cdn-cache to stream from CDN.");
     })();
 
     return () => {
       cancelAnimationFrame(raf);
+      unsub?.();
       window.removeEventListener("resize", onResize);
       renderer.domElement.removeEventListener("pointerdown", onDown);
       renderer.domElement.removeEventListener("pointermove", onMove);
       renderer.domElement.removeEventListener("pointerup", onUp);
       renderer.domElement.removeEventListener("wheel", onWheel);
+      entityMeshes.forEach((m) => scene.remove(m));
+      entityMeshes.clear();
       mount.removeChild(renderer.domElement);
       renderer.dispose();
       terrainGeom.dispose();
       terrainMat.dispose();
+      npcGeom.dispose();
+      npcMat.dispose();
     };
   }, []);
 
@@ -261,8 +269,12 @@ export function WorldViewport() {
         <div className="flex gap-4">
           <span className="text-gold">POS</span>
           <span className="text-foreground tabular-nums">
-            {pos.x.toString().padStart(4)} {pos.y.toString().padStart(4)} {pos.z.toString().padStart(4)}
+            {worldPos ? `${worldPos.x} ${worldPos.y} ${worldPos.z}` : "—"}
           </span>
+        </div>
+        <div className="flex gap-4">
+          <span className="text-gold">NPCS</span>
+          <span className="text-foreground tabular-nums">{entityCount}</span>
         </div>
       </div>
 
@@ -272,17 +284,27 @@ export function WorldViewport() {
         <div className="text-muted-foreground">{loadStatus}</div>
         {assetSummary && (
           <div className="mt-2 pt-2 border-t border-border/40 text-foreground/80 grid grid-cols-3 gap-x-3">
-            <div><span className="text-gold-muted">maps</span> {assetSummary.maps.length}</div>
-            <div><span className="text-gold-muted">tex</span> {assetSummary.textures}</div>
-            <div><span className="text-gold-muted">mesh</span> {assetSummary.meshes}</div>
+            <div>
+              <span className="text-gold-muted">maps</span> {assetSummary.maps.length}
+            </div>
+            <div>
+              <span className="text-gold-muted">tex</span> {assetSummary.textures}
+            </div>
+            <div>
+              <span className="text-gold-muted">mesh</span> {assetSummary.meshes}
+            </div>
           </div>
         )}
       </div>
 
       {/* Bottom-right controls hint */}
       <div className="absolute bottom-4 right-4 panel rounded px-4 py-3 font-mono text-[10px] text-muted-foreground pointer-events-none">
-        <div><span className="text-gold-muted">DRAG</span> orbit</div>
-        <div><span className="text-gold-muted">WHEEL</span> zoom</div>
+        <div>
+          <span className="text-gold-muted">DRAG</span> orbit
+        </div>
+        <div>
+          <span className="text-gold-muted">WHEEL</span> zoom
+        </div>
       </div>
     </div>
   );
