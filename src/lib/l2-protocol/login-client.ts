@@ -54,6 +54,7 @@ export type LoginEvent =
   | { type: "login-ok"; sessionKey1: [number, number]; sessionKey2: [number, number] }
   | { type: "login-fail"; reason: string; code: number }
   | { type: "server-list"; servers: GameServer[] }
+  | { type: "play-ok"; playKey: [number, number] }
   | { type: "raw"; direction: "in" | "out"; bytes: Uint8Array; opcode: number }
   | { type: "error"; error: string }
   | { type: "closed" };
