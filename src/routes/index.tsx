@@ -141,6 +141,7 @@ function Launcher() {
         playKey1: p1,
         playKey2: p2,
         onEvent: (ev: GameEvent) => {
+          console.log("[GS]", ev);
           if (ev.type === "status") pushStatus(ev.message);
         },
       });
