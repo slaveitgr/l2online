@@ -8,7 +8,60 @@ import {
   type CacheStats,
   type PrefetchProgress,
 } from "@/lib/l2-assets";
-import { loadManifest, summarizeFolders, type FolderSummary } from "@/lib/cdn-manifest";
+import { loadManifest, summarizeFolders, type FolderSummary, type ManifestFile } from "@/lib/cdn-manifest";
+
+interface RangeTestResult {
+  file: string;
+  size: number;
+  head: {
+    status: number;
+    contentLength: string | null;
+    acceptRanges: string | null;
+    cors: string | null;
+    ok: boolean;
+  };
+  range: {
+    status: number;
+    contentRange: string | null;
+    bytesReceived: number;
+    expectedBytes: number;
+    cors: string | null;
+    ok: boolean;
+  };
+  durationMs: number;
+}
+
+async function runRangeTest(file: ManifestFile): Promise<RangeTestResult> {
+  const url = `/api/cdn/${file.path}`;
+  const t0 = performance.now();
+
+  const head = await fetch(url, { method: "HEAD" });
+  const expectedBytes = Math.min(1024, file.size);
+  const rangeEnd = expectedBytes - 1;
+  const range = await fetch(url, { headers: { Range: `bytes=0-${rangeEnd}` } });
+  const buf = await range.arrayBuffer();
+
+  return {
+    file: file.path,
+    size: file.size,
+    head: {
+      status: head.status,
+      contentLength: head.headers.get("content-length"),
+      acceptRanges: head.headers.get("accept-ranges"),
+      cors: head.headers.get("access-control-allow-origin"),
+      ok: head.ok && head.headers.get("accept-ranges") === "bytes",
+    },
+    range: {
+      status: range.status,
+      contentRange: range.headers.get("content-range"),
+      bytesReceived: buf.byteLength,
+      expectedBytes,
+      cors: range.headers.get("access-control-allow-origin"),
+      ok: range.status === 206 && buf.byteLength === expectedBytes,
+    },
+    durationMs: Math.round(performance.now() - t0),
+  };
+}
 
 export const Route = createFileRoute("/cdn-cache")({
   head: () => ({
@@ -30,7 +83,41 @@ function CdnCachePage() {
   const [progress, setProgress] = useState<PrefetchProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
+  const [rangeTests, setRangeTests] = useState<RangeTestResult[]>([]);
+  const [rangeTesting, setRangeTesting] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  async function onRangeTest() {
+    setRangeTesting(true);
+    setError(null);
+    try {
+      const m = await loadManifest();
+      // pick first .ukx and first .utx, plus a small system file as control
+      const ukx = m.files.find((f) => f.path.toLowerCase().endsWith(".ukx") && f.size > 100_000);
+      const utx = m.files.find((f) => f.path.toLowerCase().endsWith(".utx") && f.size > 100_000);
+      const sys = m.files.find((f) => f.path.toLowerCase().startsWith("system/") && f.size > 1024);
+      const targets = [ukx, utx, sys].filter(Boolean) as ManifestFile[];
+      const results: RangeTestResult[] = [];
+      for (const f of targets) {
+        try {
+          results.push(await runRangeTest(f));
+        } catch (e) {
+          results.push({
+            file: f.path, size: f.size, durationMs: 0,
+            head: { status: 0, contentLength: null, acceptRanges: null, cors: null, ok: false },
+            range: { status: 0, contentRange: null, bytesReceived: 0, expectedBytes: 0, cors: null, ok: false },
+          });
+          console.error("Range test failed", f.path, e);
+        }
+      }
+      setRangeTests(results);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRangeTesting(false);
+    }
+  }
+
 
   async function refreshAll() {
     try {
@@ -134,6 +221,13 @@ function CdnCachePage() {
               ENTER WORLD →
             </button>
             <button
+              onClick={onRangeTest}
+              disabled={rangeTesting}
+              className="border border-gold/40 text-gold hover:bg-gold/10 font-display tracking-[0.2em] px-5 py-2.5 rounded transition-colors disabled:opacity-30"
+            >
+              {rangeTesting ? "TESTING…" : "TEST CORS / RANGE"}
+            </button>
+            <button
               onClick={onClear}
               disabled={busy}
               className="text-xs text-muted-foreground hover:text-blood transition-colors font-mono uppercase tracking-widest disabled:opacity-30 ml-auto"
@@ -173,6 +267,47 @@ function CdnCachePage() {
             )}
           </section>
         )}
+
+        {/* Range/CORS test results */}
+        {rangeTests.length > 0 && (
+          <section className="panel rounded overflow-hidden">
+            <div className="px-4 py-3 bg-input/50 flex items-center justify-between">
+              <p className="text-xs font-display tracking-[0.3em] text-gold uppercase">CORS / Range Probe</p>
+              <p className="text-[10px] font-mono text-muted-foreground">
+                HEAD + Range: bytes=0-1023 via /api/cdn proxy
+              </p>
+            </div>
+            <div className="divide-y divide-border/40">
+              {rangeTests.map((r) => {
+                const allOk = r.head.ok && r.range.ok;
+                return (
+                  <div key={r.file} className="p-4 font-mono text-xs space-y-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="truncate text-foreground/90" title={r.file}>{r.file}</span>
+                      <span className={allOk ? "text-gold" : "text-blood"}>
+                        {allOk ? "✓ PASS" : "✗ FAIL"} · {r.durationMs}ms
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-muted-foreground">
+                      <div>
+                        <span className="text-foreground/60">HEAD</span> {r.head.status}
+                        {" · "}accept-ranges: <span className={r.head.acceptRanges === "bytes" ? "text-gold" : "text-blood"}>{r.head.acceptRanges ?? "missing"}</span>
+                        {" · "}len: {r.head.contentLength ?? "—"}
+                        {" · "}CORS: <span className={r.head.cors ? "text-gold" : "text-blood"}>{r.head.cors ?? "missing"}</span>
+                      </div>
+                      <div>
+                        <span className="text-foreground/60">GET 206</span> {r.range.status}
+                        {" · "}got {r.range.bytesReceived}/{r.range.expectedBytes}B
+                        {" · "}content-range: <span className={r.range.contentRange ? "text-gold" : "text-blood"}>{r.range.contentRange ?? "missing"}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
 
         {error && (
           <section className="panel p-4 rounded border border-blood/40 text-sm text-blood font-mono">
