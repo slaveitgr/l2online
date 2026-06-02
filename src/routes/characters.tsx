@@ -131,6 +131,7 @@ function Characters() {
           </div>
         </section>
       </main>
+      {logPanel && <div className="border-t border-border/60 p-4">{logPanel}</div>}
     </div>
   );
 }
