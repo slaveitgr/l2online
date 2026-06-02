@@ -1,47 +1,33 @@
-## Διάγνωση
+## Διάγνωση #2
 
-Ο GS handshake φτάνει μέχρι το KeyPacket, αλλά μετά το `AuthLogin` ο server κάνει immediate close. Αυτό σημαίνει ότι το encrypted AuthLogin που στείλαμε ήταν garbage — δηλαδή **λάθος cipher seed**.
+Cipher seed επιβεβαιωμένα σωστό (`23 f6 da 19 d1 f0 a4 d5` με τα flag bytes να ταιριάζουν Mobius pattern), αλλά ο server κλείνει αμέσως μετά το AuthLogin.
 
-Mobius KeyPacket layout (το πιο πιθανό για slave.gr):
-```
-u8  opcode = 0x2E
-u8  ok     = 0x00 (status byte — εδώ ήταν 0x00 αλλά συνέχισε να στέλνει key)
-u8[8] cipherKey
-u32 ...  // flags (sessionId, gg, etc.)
-```
+Στο `game-client.ts → sendFrame(body, true)` περνάμε το body από `appendChecksumAndPad()` πριν το encrypt. Αυτό ήταν αντιγραφή από το **login client** όπου Blowfish απαιτεί 8-byte block alignment + checksum. Όμως ο Mobius **GameServer δεν χρησιμοποιεί ούτε checksum ούτε padding** — μόνο straight XOR stream cipher στο raw body. Άρα ο GS διαβάζει το AuthLogin με 4 extra bytes (checksum) + padding, βρίσκει garbage keys / size mismatch και κλείνει.
 
-Το ταίριασμα των επόμενων bytes επιβεβαιώνει: `00 00 00 00 01 00 00 00 01 00 00 00 ...` = `writeD(0)+writeD(1)+writeD(1)+…`, καθαρά Mobius.
+## Αλλαγή (1 αρχείο, 1 γραμμή)
 
-## Αλλαγή (1 αρχείο)
-
-### `src/lib/l2-protocol/game-client.ts` — `handlePacket` (KeyPacket branch)
-
-Παράλειψη του status byte πριν διαβάσουμε το 8-byte cipher seed:
+### `src/lib/l2-protocol/game-client.ts` — `sendFrame`
 
 ```ts
-const op = r.u8();          // 0x2E
-const ok = r.u8();          // status (0x00 ή 0x01 ανάλογα chronicle)
-const seed = r.bytes(8);    // ← τώρα διαβάζει 51 7d 35 d8 bc e4 d1 69
+private sendFrame(plainBody: Uint8Array, encrypted: boolean) {
+  if (!this.ws) return;
+  const payload = encrypted
+    ? this.crypt!.encrypt(plainBody)           // ← χωρίς checksum/padding
+    : plainBody;
+  ...
+}
 ```
 
-Επίσης:
-- Αν `ok !== 0 && ok !== 1`, treat as parse failure με σαφές μήνυμα.
-- Log και του `ok` byte ώστε αν ξανασπάσει να βλέπουμε.
+Επίσης κρατάμε ως comment: «GS Mobius: raw XOR, no checksum, no padding». Αν αργότερα δοκιμάσουμε classic L2J fork που θέλει checksum, θα το γυρίσουμε πίσω με flag.
 
-## Εφεδρικά (αν συνεχίσει να κλείνει μετά το fix)
+## Επιπλέον log
 
-Δεν τα κάνουμε τώρα — μόνο αν το παραπάνω δεν λύσει το πρόβλημα:
-1. Δοκιμή protocol revision Mobius-specific (π.χ. 152 / 419 / 110) αντί του login `0xc621`.
-2. Δοκιμή AuthLogin opcode 0x08 ή 0x0B αντί 0x2B.
-3. Έλεγχος σειράς session keys (`playKey1/playKey2` vs `loginKey1/loginKey2`).
-
-Για όλα αυτά θα χρειαστεί το log μετά το fix για να αποφασίσουμε σωστά.
+Πριν στείλουμε το AuthLogin να εκτυπώνουμε και τα πρώτα bytes του ENCRYPTED payload (πρώτα 16 bytes hex). Αν ξανακλείσει, θα δούμε αν το cipher είναι αλφαβητικά σωστό (το πρώτο byte μετά XOR πρέπει να = `0x2B ^ key[0] ^ 0` = `0x2B ^ 0x23` = `0x08`).
 
 ## Out of scope
 
-- `CharSelectionInfo` parsing — θα το δούμε μόλις φτάσει το πρώτο πραγματικό packet.
-- Καμία αλλαγή σε bridge / login client / UI.
+- Τίποτα άλλο.
 
 ## Επόμενο βήμα
 
-Ξανατρέξε ENTER WORLD και στείλε το log από `[GS] cipher seed=…` και μετά.
+Στείλε το log από `[GS] → AuthLogin` και κάτω.
