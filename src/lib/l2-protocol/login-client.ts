@@ -194,36 +194,32 @@ export class L2LoginClient {
   }
 
   private handlePacket(rawBody: Uint8Array) {
-    let body = rawBody;
-    if (this.bf) {
+    // First packet (Init) is Blowfish-encrypted with a STATIC key and then
+    // XOR-passed inside the payload (L2J Mobius `LoginEncryption.encrypt`,
+    // static branch — no checksum is appended for the static packet, only
+    // an XOR pass that embeds its accumulator at bytes [size-8..size-4]).
+    if (!this.gotInit) {
+      this.gotInit = true;
+      this.emit({ type: "status", message: `← init enc ${rawBody.length}B ${hex(rawBody, 16)}` });
+      let body: Uint8Array;
       try {
-        body = this.bf.decrypt(rawBody);
+        if (rawBody.length % 8 !== 0) throw new Error(`init length ${rawBody.length} not multiple of 8`);
+        const staticBf = new Blowfish(STATIC_BLOWFISH_KEY);
+        body = staticBf.decrypt(rawBody);
+        decXORPass(body, 0, body.length);
       } catch (err) {
-        this.settle({ type: "error", error: `Blowfish decrypt failed: ${(err as Error).message}` });
+        this.settle({ type: "error", error: `Init decrypt failed: ${(err as Error).message}` });
         return;
       }
-    }
-    const opcode = body[0];
-    this.emit({ type: "raw", direction: "in", bytes: body, opcode });
-
-    if (!this.gotInit) {
-      // Init packet (opcode 0x00). Layout:
-      //   u8 opcode (0x00)
-      //   u32 session id
-      //   u32 protocol revision
-      //   128 bytes RSA public key (scrambled)
-      //   16 bytes Blowfish key  (sometimes preceded by 4 dummy u32 -- depends on revision)
-      this.gotInit = true;
+      this.emit({ type: "status", message: `← init dec ${body.length}B ${hex(body, 32)}` });
       try {
         const r = new PacketReader(body);
-        r.u8(); // opcode
+        const op = r.u8();
+        if (op !== 0x00) throw new Error(`expected Init opcode 0x00, got 0x${op.toString(16)}`);
         const sessionId = r.u32();
         const proto = r.u32();
         const rsa = r.bytes(128);
-        // Skip 16 reserved bytes (GG keys / unknown ints) — some chronicles do, some don't.
-        // We try the layout with 16-byte skip first (most common from Interlude onward).
-        const skip = 16;
-        r.skip(skip);
+        r.skip(16); // 4×u32 GG dummy values (Init.java)
         const bfKey = r.bytes(16);
 
         this.sessionId = sessionId;
@@ -232,8 +228,10 @@ export class L2LoginClient {
         this.bf = new Blowfish(bfKey);
 
         this.emit({ type: "init", protocolRevision: proto, sessionId });
-        this.emit({ type: "status", message: `Init OK. revision=${proto} sessionId=0x${sessionId.toString(16)}` });
-
+        this.emit({
+          type: "status",
+          message: `Init OK. revision=0x${proto.toString(16)} session=0x${sessionId.toString(16)} bfKey=${hex(bfKey, 16)}`,
+        });
         this.sendGameGuardAuth();
       } catch (err) {
         this.settle({ type: "error", error: `Init parse failed: ${(err as Error).message}` });
@@ -241,33 +239,39 @@ export class L2LoginClient {
       return;
     }
 
-    // Verify checksum (best-effort — some custom servers skip it)
-    // verifyChecksum(body); — purely informational; do not block on it.
+    // Subsequent packets: Blowfish-decrypt with the per-session key.
+    let body: Uint8Array;
+    try {
+      body = this.bf!.decrypt(rawBody);
+    } catch (err) {
+      this.settle({ type: "error", error: `Blowfish decrypt failed: ${(err as Error).message}` });
+      return;
+    }
+    const opcode = body[0];
+    this.emit({ type: "raw", direction: "in", bytes: body, opcode });
+    this.emit({ type: "status", message: `← opcode 0x${opcode.toString(16).padStart(2, "0")} (${body.length}B) ${hex(body, 24)}` });
 
+    // L2J Mobius opcode map (loginserver/network/LoginServerPackets.java):
+    //   0x00 Init  0x01 LoginFail  0x02 AccountKicked  0x03 LoginOk
+    //   0x04 ServerList  0x06 PlayFail  0x07 PlayOk  0x0B GGAuth
+    //   0x0D LoginOptFail  0x11 PIAgreementCheck  0x12 PIAgreementAck
     switch (opcode) {
       case 0x0b: {
-        // GGAuth response (session id echoed back)
         this.emit({ type: "gg-ok" });
         this.sendRequestAuthLogin();
         return;
       }
       case 0x03: {
-        // LoginOk
+        // LoginOk: opcode + sessionKey1 (2×u32) + ...
         const r = new PacketReader(body);
         r.u8();
         const k1a = r.u32();
         const k1b = r.u32();
-        this.emit({
-          type: "login-ok",
-          sessionKey1: [k1a, k1b],
-          sessionKey2: [0, 0],
-        });
-        // request server list
+        this.emit({ type: "login-ok", sessionKey1: [k1a, k1b], sessionKey2: [0, 0] });
         this.sendRequestServerList(k1a, k1b);
         return;
       }
       case 0x01: {
-        // LoginFail
         const r = new PacketReader(body);
         r.u8();
         const reason = r.u32();
@@ -275,8 +279,11 @@ export class L2LoginClient {
         this.settle({ type: "login-fail", reason: text, code: reason });
         return;
       }
+      case 0x02: {
+        this.settle({ type: "login-fail", reason: "Account kicked", code: 0x02 });
+        return;
+      }
       case 0x04: {
-        // ServerList
         const r = new PacketReader(body);
         r.u8();
         const count = r.u8();
@@ -298,16 +305,34 @@ export class L2LoginClient {
         this.settle({ type: "server-list", servers });
         return;
       }
-      case 0x06:
-      case 0x07: {
-        // PlayFail / AccountKicked
-        this.settle({ type: "login-fail", reason: `Server rejected (opcode 0x${opcode.toString(16)})`, code: opcode });
+      case 0x06: {
+        this.settle({ type: "login-fail", reason: "Play failed (server rejected)", code: 0x06 });
+        return;
+      }
+      case 0x0d: {
+        const r = new PacketReader(body);
+        r.u8();
+        const reason = r.u32();
+        this.settle({ type: "login-fail", reason: `Login option failed (0x${reason.toString(16)})`, code: 0x0d });
+        return;
+      }
+      case 0x11: {
+        // PIAgreementCheck: server asks if user has accepted Korean PI agreement.
+        // We auto-reply with RequestPIAgreement(agreement=1) so the flow continues.
+        this.emit({ type: "status", message: "PIAgreementCheck → auto-accepting" });
+        this.sendRequestPIAgreement();
+        return;
+      }
+      case 0x12: {
+        // PIAgreementAck — no action, just wait for LoginOk.
+        this.emit({ type: "status", message: "PIAgreementAck received" });
         return;
       }
       default: {
         this.emit({ type: "status", message: `Unhandled opcode 0x${opcode.toString(16)} (${body.length} bytes)` });
       }
     }
+
   }
 
   // ===== TX =====
