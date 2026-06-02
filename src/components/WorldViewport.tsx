@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { listFiles, getManifest, getCacheStats, formatBytes, type CachedFileMeta } from "@/lib/l2-assets";
+import { listFiles, getManifest, getCacheStats, getFile, formatBytes, type CachedFileMeta } from "@/lib/l2-assets";
+import { readFromMount } from "@/lib/local-mount";
+import { L2Package } from "@/lib/l2-package";
 import { getGameConnection, type GameEvent, type WorldEntity } from "@/lib/l2-protocol/game-client";
 
 /**
