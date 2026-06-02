@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { listFiles, getManifest, type CachedFileMeta } from "@/lib/l2-assets";
+import { listFiles, getManifest, getCacheStats, formatBytes, type CachedFileMeta } from "@/lib/l2-assets";
 
 /**
  * Phase 1 viewport.
@@ -214,21 +214,21 @@ export function WorldViewport() {
     // ── Asset loader hook (reads cached client) ──────────────────────────
     (async () => {
       setLoadStatus("Reading cached client…");
-      const manifest = await getManifest();
-      if (!manifest) {
-        setLoadStatus("No cached client. Showing placeholder scene.");
-        return;
-      }
-      setLoadStatus("Indexing maps…");
+      const [manifest, stats] = await Promise.all([getManifest(), getCacheStats().catch(() => null)]);
+      const rootName = manifest?.rootName ?? "CDN cache";
       const maps = await listFiles("maps");
       const textures = (await listFiles("textures")).length;
       const meshes = (await listFiles("staticmeshes")).length;
-      setAssetSummary({ rootName: manifest.rootName, maps, textures, meshes });
-      setLoadStatus(
-        maps.length > 0
-          ? `Found ${maps.length} maps · Lineage2JS loader integration pending (Phase 2)`
-          : "No .unr maps found in cache.",
-      );
+      setAssetSummary({ rootName, maps, textures, meshes });
+      if (stats && stats.cachedFiles > 0) {
+        setLoadStatus(
+          `${stats.cachedFiles}/${stats.totalFiles} files cached · ${formatBytes(stats.cachedBytes)} · Phase 2 parser pending`,
+        );
+      } else if (maps.length > 0) {
+        setLoadStatus(`Found ${maps.length} maps · Lineage2JS loader integration pending (Phase 2)`);
+      } else {
+        setLoadStatus("No cached assets. Visit /cdn-cache to stream from CDN.");
+      }
       // TODO Phase 2: instantiate Lineage2JS package reader here, decode
       // the chosen .unr (e.g. 17_25.unr — Talking Island village), translate
       // its actors into three.js meshes, and replace the placeholder terrain.

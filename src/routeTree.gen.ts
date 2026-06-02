@@ -12,7 +12,9 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorldRouteImport } from './routes/world'
 import { Route as SelectFilesRouteImport } from './routes/select-files'
 import { Route as CharactersRouteImport } from './routes/characters'
+import { Route as CdnCacheRouteImport } from './routes/cdn-cache'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiCdnSplatRouteImport } from './routes/api/cdn/$'
 
 const WorldRoute = WorldRouteImport.update({
   id: '/world',
@@ -29,44 +31,81 @@ const CharactersRoute = CharactersRouteImport.update({
   path: '/characters',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CdnCacheRoute = CdnCacheRouteImport.update({
+  id: '/cdn-cache',
+  path: '/cdn-cache',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCdnSplatRoute = ApiCdnSplatRouteImport.update({
+  id: '/api/cdn/$',
+  path: '/api/cdn/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/cdn-cache': typeof CdnCacheRoute
   '/characters': typeof CharactersRoute
   '/select-files': typeof SelectFilesRoute
   '/world': typeof WorldRoute
+  '/api/cdn/$': typeof ApiCdnSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/cdn-cache': typeof CdnCacheRoute
   '/characters': typeof CharactersRoute
   '/select-files': typeof SelectFilesRoute
   '/world': typeof WorldRoute
+  '/api/cdn/$': typeof ApiCdnSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/cdn-cache': typeof CdnCacheRoute
   '/characters': typeof CharactersRoute
   '/select-files': typeof SelectFilesRoute
   '/world': typeof WorldRoute
+  '/api/cdn/$': typeof ApiCdnSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/characters' | '/select-files' | '/world'
+  fullPaths:
+    | '/'
+    | '/cdn-cache'
+    | '/characters'
+    | '/select-files'
+    | '/world'
+    | '/api/cdn/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/characters' | '/select-files' | '/world'
-  id: '__root__' | '/' | '/characters' | '/select-files' | '/world'
+  to:
+    | '/'
+    | '/cdn-cache'
+    | '/characters'
+    | '/select-files'
+    | '/world'
+    | '/api/cdn/$'
+  id:
+    | '__root__'
+    | '/'
+    | '/cdn-cache'
+    | '/characters'
+    | '/select-files'
+    | '/world'
+    | '/api/cdn/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  CdnCacheRoute: typeof CdnCacheRoute
   CharactersRoute: typeof CharactersRoute
   SelectFilesRoute: typeof SelectFilesRoute
   WorldRoute: typeof WorldRoute
+  ApiCdnSplatRoute: typeof ApiCdnSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -92,6 +131,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CharactersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cdn-cache': {
+      id: '/cdn-cache'
+      path: '/cdn-cache'
+      fullPath: '/cdn-cache'
+      preLoaderRoute: typeof CdnCacheRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -99,14 +145,23 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/cdn/$': {
+      id: '/api/cdn/$'
+      path: '/api/cdn/$'
+      fullPath: '/api/cdn/$'
+      preLoaderRoute: typeof ApiCdnSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  CdnCacheRoute: CdnCacheRoute,
   CharactersRoute: CharactersRoute,
   SelectFilesRoute: SelectFilesRoute,
   WorldRoute: WorldRoute,
+  ApiCdnSplatRoute: ApiCdnSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

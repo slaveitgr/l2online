@@ -27,7 +27,7 @@ function Launcher() {
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     sessionStorage.setItem("l2_session", JSON.stringify({ username: username || "Adventurer", server }));
-    navigate({ to: "/select-files" });
+    navigate({ to: "/cdn-cache" });
   };
 
   return (
