@@ -226,6 +226,7 @@ function CdnCachePage() {
               className="border border-gold/40 text-gold hover:bg-gold/10 font-display tracking-[0.2em] px-5 py-2.5 rounded transition-colors disabled:opacity-30"
             >
               {rangeTesting ? "TESTING…" : "TEST CORS / RANGE"}
+            </button>
             <button
               onClick={onClear}
               disabled={busy}
