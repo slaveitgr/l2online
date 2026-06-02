@@ -12,9 +12,17 @@
  */
 import { createFileRoute } from "@tanstack/react-router";
 
-const ALLOWED_HOSTS = new Set(["l2server.slave.gr"]);
-// L2 login: 2106 (default). Game servers: 7777..7788 (common range).
-const ALLOWED_PORTS = new Set<number>([2106, 7777, 7778, 7779, 7780, 7781, 7782, 7783, 7784, 7785]);
+const ALLOWED_HOSTS = new Set([
+  "l2server.slave.gr",
+  // Game server IPs returned by the login server's ServerList for slave.gr.
+  "176.92.69.220",
+]);
+// L2 login: 2106. Game servers: 2000-2010 + 7777-7790 (covers Mobius/Interlude/GoD).
+const ALLOWED_PORTS = new Set<number>([
+  2106,
+  2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010,
+  7777, 7778, 7779, 7780, 7781, 7782, 7783, 7784, 7785, 7786, 7787, 7788, 7789, 7790,
+]);
 
 function bad(status: number, msg: string) {
   return new Response(msg, { status, headers: { "Content-Type": "text/plain" } });
