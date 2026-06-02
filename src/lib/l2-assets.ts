@@ -267,6 +267,14 @@ export async function listFiles(folder?: string): Promise<CachedFileMeta[]> {
     .map((k) => ({ path: k, size: 0, ext: k.split(".").pop() ?? "" }));
 }
 
+const KEY_FOLDERS = ["system", "maps", "textures", "staticmeshes", "animations", "sounds"];
+
+export function validateManifest(m: ClientManifest): { ok: boolean; missing: string[] } {
+  const present = new Set(Object.keys(m.folders));
+  const missing = KEY_FOLDERS.filter((f) => !present.has(f));
+  return { ok: missing.length === 0, missing };
+}
+
 export function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
