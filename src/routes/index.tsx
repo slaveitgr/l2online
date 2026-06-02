@@ -237,12 +237,13 @@ function Launcher() {
       </div>
 
       {/* Bottom-right corner links */}
-      <div className="absolute bottom-12 right-6 flex flex-col items-end gap-1 text-right">
-        <button className="l2-corner-link">New Account <span className="opacity-60">↗</span></button>
-        <button className="l2-corner-link">Lost Account <span className="opacity-60">↗</span></button>
-        <button className="l2-corner-link">Links <span className="opacity-60">↗</span></button>
+      <div className="absolute bottom-12 right-6 flex flex-col items-end gap-1 text-right pointer-events-auto">
+        <a href="https://l2.slave.gr/register" target="_blank" rel="noreferrer" className="l2-corner-link">New Account <span className="opacity-60">↗</span></a>
+        <a href="http://l2.slave.gr/forgot-password" target="_blank" rel="noreferrer" className="l2-corner-link">Lost Account <span className="opacity-60">↗</span></a>
+        <a href="https://l2.slave.gr" target="_blank" rel="noreferrer" className="l2-corner-link">Links <span className="opacity-60">↗</span></a>
         <Link to="/cdn-cache" className="l2-corner-link">Settings <span className="opacity-60">↗</span></Link>
       </div>
+
 
       {/* Bottom-left protocol log */}
       {statusLog.length > 0 && (
