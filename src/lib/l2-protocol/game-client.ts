@@ -153,8 +153,9 @@ export class L2GameClient {
 
     const opcode = body[0];
 
-    // KeyPacket: opcode 0x2E (Mobius/Interlude+) or 0x00 (classic). Both share
-    // the same payload: opcode + 8-byte cipher seed + flags. Treat both equally.
+    // KeyPacket (Mobius/Interlude GS): opcode 0x2E followed by 8-byte cipher
+    // seed (NO separate "ok" flag — the bytes right after the opcode ARE the
+    // key). Classic C4/C6 uses opcode 0x00 with the same layout.
     if (!this.gotKey) {
       try {
         const r = new PacketReader(body);
@@ -162,15 +163,11 @@ export class L2GameClient {
         if (op !== 0x2e && op !== 0x00) {
           throw new Error(`expected KeyPacket opcode 0x2E or 0x00, got 0x${op.toString(16)}`);
         }
-        const ok = r.u8();
-        if (ok !== 0x00 && ok !== 0x01) {
-          throw new Error(`unexpected KeyPacket status byte 0x${ok.toString(16)}`);
-        }
         const seed = r.bytes(8);
         this.crypt = new GameCrypt(seed);
         this.gotKey = true;
         this.emit({ type: "key-ok" });
-        this.emit({ type: "status", message: `[GS] cipher ok=${ok} seed=${hex(seed, 8)}` });
+        this.emit({ type: "status", message: `[GS] cipher seed=${hex(seed, 8)}` });
         this.sendAuthLogin();
       } catch (err) {
         this.settle({ type: "error", error: `[GS] KeyPacket parse failed: ${(err as Error).message}` });
