@@ -264,7 +264,7 @@ export class L2GameClient {
         r.u32();          // builderLevel
         r.u32();          // sex
         const race = r.u32();
-        r.u32();          // baseClass
+        const baseClass = r.u32();
         r.u32();          // active
         r.skip(12);       // x, y, z (i32×3)
         r.skip(8);        // hp (f64)
@@ -272,16 +272,12 @@ export class L2GameClient {
         r.u32();          // sp
         r.skip(8);        // exp (u64)
         const level = r.u32();
-        // Skip the rest of this char's payload. Chronicles differ wildly here
-        // (karma/pk/pvp + paperdoll = lots of fields). We can't seek reliably
-        // so we just bail after collecting the first char's basics if reading
-        // overshoots — keeps us defensive against parse drift.
         if (r.remaining < 0) break;
 
         chars.push({
           id: objectId.toString(16),
           name,
-          klass: classNameOf(0),  // overridden below from baseClass if we parsed it
+          klass: classNameOf(baseClass),
           race: raceNameOf(race),
           level,
           color: colorFromName(name),
