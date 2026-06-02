@@ -1,70 +1,63 @@
-# Lineage 2 Browser Client — Φάση 1
+## Phase 1b — CDN streaming (αντικαθιστά το folder upload)
 
-Χτίζουμε ένα web-based L2 client shell στο Lovable με βάση τα `Lineage2JS` (three.js renderer για L2 Unreal assets) και `l2js-client` (TS port του πρωτοκόλλου). Σε αυτή τη φάση: **UI shell + asset loader + 3D viewport**. Χωρίς πραγματικό networking (mock login).
+Το manifest σου είναι gold. Το CDN σερβίρει `200 OK` + `accept-ranges: bytes` + `cache-control: max-age=2592000` (30 ημέρες) — άρα partial reads και cache δουλεύουν. **Αλλά δεν στέλνει `Access-Control-Allow-Origin`**, οπότε ο browser μπλοκάρει direct fetches από το lovable domain. Λύση: TanStack server route proxy.
 
-## Τι περιλαμβάνει
+### Τι θα χτιστεί
 
-**1. Launcher / Login screen** (`/`)
-- L2-style dark UI: brand header, background art, version label
-- Server list dropdown (mock δεδομένα: Bartz, Sieghardt, κλπ)
-- Username/password form (stub — δεν στέλνει πουθενά, κάνει redirect στο `/select-files`)
-- "Settings" κουμπί → audio/graphics presets (αποθήκευση σε localStorage)
+**1. Bundle manifest** — `public/cdn-manifest.json` (αντίγραφο του δικού σου, 2.5 MB) ώστε να φορτώνεται instant χωρίς CDN roundtrip. Το `base_url` παραμένει `https://l2client.slave.gr/updater/files`.
 
-**2. Asset selection** (`/select-files`)
-- File picker (`webkitdirectory`) για τον φάκελο του L2 Interlude client
-- Validation: εντοπισμός κρίσιμων φακέλων (`system/`, `maps/`, `textures/`, `staticmeshes/`, `animations/`)
-- Progress UI κατά το indexing
-- Cache σε **IndexedDB** (μέσω `idb` library) ώστε να μην ξαναζητάει τα αρχεία σε επόμενα sessions
-- "Forget cached client" κουμπί
+**2. CORS proxy server route** — `src/routes/api/cdn/$.ts`:
+- `GET /api/cdn/Maps/19_22.unr` → forward σε `https://l2client.slave.gr/updater/files/Maps/19_22.unr`
+- Passthrough του `Range` request header → `Range` response header (για streaming μεγάλων αρχείων χωρίς να γεμίζει η μνήμη)
+- Cache headers: `cache-control: public, max-age=2592000, immutable` (το sha256 είναι content-addressed effectively)
+- Allowlist: μόνο paths που υπάρχουν στο manifest (anti-abuse)
 
-**3. Character select (stub)** (`/characters`)
-- Mock 3 χαρακτήρες (πορτρέτο, name, class, level) σε hardcoded data
-- "Enter World" → πάει στο `/world`
+**3. Refactor `src/lib/l2-assets.ts`**:
+- Νέα `CDNManifest` interface (parse `cdn-manifest.json` σε Map για O(1) lookup ανά path)
+- `getFile(relPath)` →
+  1. IndexedDB hit; επιστροφή
+  2. Miss → `fetch('/api/cdn/' + path)` → integrity check με sha256 → `IDB.put` → return
+- `prefetchFolder(folder, onProgress)` → bulk download με concurrency limit (πχ 6 παράλληλα), progress callback
+- Νέα `getStats()` → cached size, total size, % per folder
+- Κρατάμε το `indexClientFiles` ως fallback "advanced: upload local copy"
 
-**4. World viewport** (`/world`)
-- Full-screen `<canvas>` με three.js
-- Ενσωμάτωση `Lineage2JS` (ή port των loaders του για `.unr/.utx/.usx`)
-- Φόρτωμα ενός default map (π.χ. Talking Island village) από το cached client
-- Orbit camera controls, basic HUD (FPS counter, position)
-- Loading screen με progress bar καθώς διαβάζονται τα assets
+**4. Νέα route `/cdn-cache`** (αντικαθιστά το current `/select-files` ως default flow):
+- Header: "Lineage 2 — Asset Distribution"
+- Manifest stats: 4.652 files / 34.96 GB total, X cached
+- Folder table με ανά γραμμή: όνομα · file count · size · cached% · `[Prefetch]` button
+- Default action: **"Prefetch Essentials" button** που κατεβάζει `system/` (0.49 GB) + `Maps/` (3.11 GB) = ~3.6 GB
+- Live progress bar (files done / total bytes / MB/s)
+- "Clear cache" + "Upload local folder instead" (existing flow)
 
-**5. Shared layout**
-- Dark L2 aesthetic: βαθύ μαύρο/μπορντό background, gold/amber accents, serif display font για τίτλους, monospace για debug HUD
-- Design tokens στο `src/styles.css` (oklch)
+**5. Update flow**:
+- `/` Launcher → "Enter game" → check cache state
+  - Αν `system/` cached → πάει σε `/characters`
+  - Αλλιώς → redirect σε `/cdn-cache` με prompt
+- `/select-files` παραμένει για όσους θέλουν local upload
 
-## Routes
+**6. `WorldViewport` HUD** — δείχνει "Cache: 3.42 GB / 34.96 GB · 412 files" + live download bar όταν ο loader ζητάει νέο file.
+
+### Out of scope (Phase 2)
+
+- Πραγματικό parsing των `.unr/.utx/.ukx` (Salvation-era UE2.5 — `Lineage2JS` parsers χρειάζονται port)
+- WebSocket networking με τον L2jMobius server
+- Καθαρισμός cache με LRU eviction (απλό clear-all για τώρα)
+
+### Τεχνικά risk notes
+
+- **Bandwidth στον server σου**: 35 GB × visitors. Cloudflare cache helps, αλλά πρόσεξε το egress. Για demo OK.
+- **IndexedDB quota**: browsers επιτρέπουν συνήθως 60% του free disk. 3.6 GB περνάει σε >90% των desktops. Θα δείχνουμε `navigator.storage.estimate()`.
+- **Cloudflare timeout**: τα >100 MB αρχεία (π.χ. `branch.ukx` = 138 MB) χρειάζονται streaming proxy — `response.body` pipe-through, όχι `.arrayBuffer()` στον server.
+- **sha256 integrity** γίνεται client-side μετά το download (Web Crypto `crypto.subtle.digest`).
+
+### Files που αλλάζουν
 
 ```text
-src/routes/
-  __root.tsx          shell + providers
-  index.tsx           launcher / login (stub)
-  select-files.tsx    asset folder picker + IndexedDB cache
-  characters.tsx      stub character select
-  world.tsx           three.js + Lineage2JS viewport
+public/cdn-manifest.json         (νέο — copy του uploaded)
+src/lib/l2-assets.ts             (refactor: CDN-first)
+src/lib/cdn-manifest.ts          (νέο — typed loader/lookup)
+src/routes/api/cdn/$.ts          (νέο — CORS proxy)
+src/routes/cdn-cache.tsx         (νέο — main UI)
+src/routes/index.tsx             (update: smart redirect)
+src/components/WorldViewport.tsx (HUD update)
 ```
-
-## Τεχνικές σημειώσεις
-
-- **Dependencies**: `three`, `@types/three`, `idb`, και προσπάθεια εγκατάστασης `lineage2js` αν υπάρχει ως npm package. Αν όχι, vendor-άρουμε τα απαραίτητα loader αρχεία τοπικά (αναφερόμενοι στο repo `realratchet/Lineage2JS`).
-- **`l2js-client`**: ΔΕΝ το εγκαθιστούμε σε αυτή τη φάση (δεν έχουμε networking). Αναφέρεται στον σχεδιασμό για Φάση 2.
-- **Cloudflare Worker backend**: μένει αδρανές — όλη η λογική είναι client-side. Το server δεν αγγίζει L2 πρωτόκολλο.
-- **IndexedDB**: αποθήκευση raw bytes των `.unr/.utx/.usx` keyed by relative path. Lazy loading (φόρτωμα ανά map).
-- **Worker thread** για το parsing των Unreal packages ώστε να μην παγώνει το main thread (αν δείξει αναγκαίο).
-- **Browser compatibility**: `showDirectoryPicker` (File System Access API) όπου υπάρχει, fallback σε `<input type="file" webkitdirectory>`.
-
-## Νομικά / ξεκάθαρα στον χρήστη
-
-- Πουθενά δεν διανέμουμε L2 client assets. Ο χρήστης ανεβάζει δικά του local αρχεία.
-- Στο UI θα υπάρχει σαφές disclaimer.
-
-## Εκτός σκοπού (για επόμενες φάσεις)
-
-- Πραγματικό login/auth flow με L2 server
-- WebSocket proxy (TCP → WS) — απαιτεί external host
-- Movement / chat / combat / packets
-- Multi-map streaming, character animations beyond default pose
-- UI inventory / skills / party windows
-
-## Παραδοτέο Φάσης 1
-
-Ένα browser app όπου: ανοίγεις → βλέπεις L2 launcher → "login" → διαλέγεις τον φάκελο του Interlude client → φορτώνει assets → βλέπεις ένα 3D map να γίνεται render σε real-time με orbit camera. Όλα τα screens συνδεδεμένα, σταθερά, με dark L2 aesthetic.
