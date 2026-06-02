@@ -274,6 +274,7 @@ export class L2LoginClient {
         r.u8();
         const k1a = r.u32();
         const k1b = r.u32();
+        this.loginKey1 = [k1a, k1b];
         this.emit({ type: "login-ok", sessionKey1: [k1a, k1b], sessionKey2: [0, 0] });
         this.sendRequestServerList(k1a, k1b);
         return;
@@ -309,7 +310,26 @@ export class L2LoginClient {
           const brackets = r.u8() !== 0;
           servers.push({ id, ip, port, ageLimit, pvp, currentPlayers, maxPlayers, status, type, brackets });
         }
-        this.settle({ type: "server-list", servers });
+        // Emit + RESOLVE start() promise. Keep WS open so the caller may
+        // chain selectServer() to obtain PlayOk on the same connection.
+        this.emit({ type: "server-list", servers });
+        if (!this.settled) {
+          this.settled = true;
+          this.resolve({ type: "server-list", servers });
+        }
+        return;
+      }
+      case 0x07: {
+        // PlayOk: opcode + playKey1 + playKey2 (some chronicles swap order;
+        // Mobius uses playKey1=u32 then playKey2=u32).
+        const r = new PacketReader(body);
+        r.u8();
+        const p1 = r.u32();
+        const p2 = r.u32();
+        const ev: LoginEvent = { type: "play-ok", playKey: [p1, p2] };
+        this.emit(ev);
+        this.playResolve?.(ev);
+        this.playResolve = null;
         return;
       }
       case 0x06: {
