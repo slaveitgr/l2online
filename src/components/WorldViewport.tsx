@@ -222,6 +222,10 @@ export function WorldViewport() {
     };
     tick();
 
+    // ── Map layer (real L2 .unr) ─────────────────────────────────────────
+    const mapDisposables: Array<{ dispose: () => void }> = [];
+    let mapGroup: THREE.Group | null = null;
+
     // ── Asset loader hook (reads cached client) ──────────────────────────
     (async () => {
       setLoadStatus("Reading cached client…");
@@ -232,13 +236,73 @@ export function WorldViewport() {
       const meshes = (await listFiles("staticmeshes").catch(() => [])).length;
       setAssetSummary({ rootName, maps, textures, meshes });
       if (stats && stats.cachedFiles > 0)
-        setLoadStatus(
-          `${stats.cachedFiles}/${stats.totalFiles} files cached · ${formatBytes(stats.cachedBytes)} · Phase 2 parser pending`,
-        );
-      else if (maps.length > 0)
-        setLoadStatus(`Found ${maps.length} maps · Lineage2JS loader integration pending (Phase 2)`);
-      else setLoadStatus("No cached assets. Visit /cdn-cache to stream from CDN.");
-    })();
+        setLoadStatus(`${stats.cachedFiles}/${stats.totalFiles} files cached · ${formatBytes(stats.cachedBytes)}`);
+      else if (maps.length > 0) setLoadStatus(`Found ${maps.length} maps · loading sector…`);
+      else { setLoadStatus("No cached assets. Visit /cdn-cache to stream from CDN."); return; }
+
+      // Try preferred Talking Island sector first, then any cached map.
+      const candidates = ["maps/17_25.unr", ...maps.map((m) => m.path)];
+      let pkg: L2Package | null = null;
+      let pickedPath = "";
+      for (const path of candidates) {
+        try {
+          const bytes = (await getFile(path)) ?? (await readFromMount(path));
+          if (!bytes) continue;
+          pkg = L2Package.from(bytes.buffer as ArrayBuffer);
+          pickedPath = path;
+          break;
+        } catch (err) {
+          console.warn("[map] failed to parse", path, err);
+        }
+      }
+      if (!pkg) { setLoadStatus("No parsable .unr in cache."); return; }
+
+      const actors = pkg.readActorPlacements();
+      const spawns = pkg.readActorPlacements(["PlayerStart"]);
+      console.log("[map]", pickedPath, "classes:", pkg.classHistogram());
+      setMapInfo({ path: pickedPath, actors: actors.length, spawns: spawns.length });
+      setLoadStatus(`${pickedPath} · ${actors.length} actors · ${spawns.length} spawns`);
+
+      if (actors.length === 0) return;
+
+      // Center the placement cloud on its centroid.
+      const cx = actors.reduce((s, a) => s + a.x, 0) / actors.length;
+      const cy = actors.reduce((s, a) => s + a.y, 0) / actors.length;
+      const cz = actors.reduce((s, a) => s + a.z, 0) / actors.length;
+
+      mapGroup = new THREE.Group();
+      const geo = new THREE.BoxGeometry(2, 4, 2);
+      const mat = new THREE.MeshStandardMaterial({ color: 0x8a8170, roughness: 0.85 });
+      const inst = new THREE.InstancedMesh(geo, mat, actors.length);
+      const m = new THREE.Matrix4();
+      actors.forEach((a, i) => {
+        // L2 (x east, y north, z up) → three (x, y up, z)
+        m.makeTranslation((a.x - cx) / SCALE, (a.z - cz) / SCALE, (a.y - cy) / SCALE);
+        inst.setMatrixAt(i, m);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      mapGroup.add(inst);
+      mapDisposables.push(geo, mat);
+
+      // Spawn markers (green)
+      if (spawns.length) {
+        const sg = new THREE.ConeGeometry(1.2, 3, 6);
+        const sm = new THREE.MeshStandardMaterial({ color: 0x3fdc6a, emissive: 0x114420 });
+        const sInst = new THREE.InstancedMesh(sg, sm, spawns.length);
+        spawns.forEach((a, i) => {
+          m.makeTranslation((a.x - cx) / SCALE, (a.z - cz) / SCALE + 1.5, (a.y - cy) / SCALE);
+          sInst.setMatrixAt(i, m);
+        });
+        sInst.instanceMatrix.needsUpdate = true;
+        mapGroup.add(sInst);
+        mapDisposables.push(sg, sm);
+      }
+
+      scene.add(mapGroup);
+    })().catch((err) => {
+      console.error("[map] loader failed", err);
+      setLoadStatus(`Map load failed: ${(err as Error).message}`);
+    });
 
     return () => {
       cancelAnimationFrame(raf);
@@ -250,6 +314,8 @@ export function WorldViewport() {
       renderer.domElement.removeEventListener("wheel", onWheel);
       entityMeshes.forEach((m) => scene.remove(m));
       entityMeshes.clear();
+      if (mapGroup) scene.remove(mapGroup);
+      mapDisposables.forEach((d) => d.dispose());
       mount.removeChild(renderer.domElement);
       renderer.dispose();
       terrainGeom.dispose();
