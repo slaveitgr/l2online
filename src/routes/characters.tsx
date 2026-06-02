@@ -1,0 +1,111 @@
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { useState } from "react";
+
+export const Route = createFileRoute("/characters")({
+  head: () => ({
+    meta: [
+      { title: "Character Select — Lineage II Web" },
+      { name: "description", content: "Choose your hero and enter the world." },
+    ],
+  }),
+  component: Characters,
+});
+
+interface Char {
+  id: string;
+  name: string;
+  klass: string;
+  level: number;
+  race: string;
+  color: string;
+}
+
+const CHARS: Char[] = [
+  { id: "c1", name: "Vesperion", klass: "Phoenix Knight", level: 78, race: "Human", color: "oklch(0.55 0.15 30)" },
+  { id: "c2", name: "Lyrael", klass: "Eva's Saint", level: 76, race: "Elf", color: "oklch(0.6 0.12 160)" },
+  { id: "c3", name: "Drakhar", klass: "Soultaker", level: 81, race: "Dark Elf", color: "oklch(0.45 0.18 310)" },
+];
+
+function Characters() {
+  const navigate = useNavigate();
+  const [selected, setSelected] = useState(CHARS[0].id);
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <header className="border-b border-border/60 px-6 py-3 flex items-center justify-between">
+        <Link to="/select-files" className="flex items-center gap-3 group">
+          <div className="w-8 h-8 rounded-sm bg-gradient-to-br from-primary to-blood flex items-center justify-center font-display text-primary-foreground font-bold">L</div>
+          <div>
+            <h1 className="font-display text-gold text-lg leading-none tracking-widest group-hover:brightness-125 transition">LINEAGE II</h1>
+            <p className="text-[10px] text-muted-foreground tracking-[0.3em] uppercase">Character Select</p>
+          </div>
+        </Link>
+        <Link to="/select-files" className="text-xs text-muted-foreground hover:text-gold transition">← Back</Link>
+      </header>
+
+      <main className="flex-1 grid lg:grid-cols-[420px_1fr]">
+        {/* Roster */}
+        <aside className="border-r border-border/60 p-6 space-y-3 overflow-y-auto">
+          <p className="text-gold/80 font-mono text-xs tracking-[0.4em] uppercase mb-4">Heroes — 3 / 7</p>
+          {CHARS.map((c) => {
+            const active = c.id === selected;
+            return (
+              <button
+                key={c.id}
+                onClick={() => setSelected(c.id)}
+                className={`w-full text-left panel rounded p-4 flex items-center gap-4 transition-all ${
+                  active ? "ring-1 ring-gold border-gold" : "opacity-70 hover:opacity-100"
+                }`}
+              >
+                <div
+                  className="w-14 h-14 rounded shrink-0 flex items-center justify-center font-display text-2xl text-primary-foreground"
+                  style={{ background: `linear-gradient(135deg, ${c.color}, oklch(0.2 0.03 30))` }}
+                >
+                  {c.name[0]}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-display text-lg text-foreground truncate">{c.name}</p>
+                  <p className="text-xs text-muted-foreground font-mono">{c.race} · {c.klass}</p>
+                  <p className="text-xs text-gold mt-1">Lv. {c.level}</p>
+                </div>
+              </button>
+            );
+          })}
+          <button className="w-full border border-dashed border-border rounded p-4 text-sm text-muted-foreground hover:text-gold hover:border-gold-muted transition">
+            + Create new
+          </button>
+        </aside>
+
+        {/* Preview */}
+        <section className="relative flex flex-col items-center justify-center p-12">
+          <div className="absolute inset-0 bg-gradient-to-br from-blood/20 via-background to-background" />
+          <div className="relative z-10 text-center">
+            {(() => {
+              const c = CHARS.find((x) => x.id === selected)!;
+              return (
+                <>
+                  <div
+                    className="w-48 h-48 mx-auto rounded-full border-4 border-gold-muted/40 flex items-center justify-center font-display text-7xl text-primary-foreground shadow-2xl"
+                    style={{ background: `radial-gradient(circle, ${c.color}, oklch(0.15 0.02 30))` }}
+                  >
+                    {c.name[0]}
+                  </div>
+                  <h2 className="font-display text-5xl text-foreground mt-8 tracking-wider">{c.name}</h2>
+                  <p className="text-gold mt-2 tracking-widest font-mono">{c.race.toUpperCase()} · {c.klass.toUpperCase()}</p>
+                  <p className="text-muted-foreground mt-1">Level {c.level}</p>
+                  <div className="gold-divider mt-8 max-w-xs mx-auto" />
+                  <button
+                    onClick={() => navigate({ to: "/world" })}
+                    className="mt-8 bg-gradient-to-b from-primary to-gold-muted text-primary-foreground font-display tracking-[0.3em] px-12 py-4 rounded border border-gold/40 hover:brightness-110 transition-all shadow-xl"
+                  >
+                    ENTER WORLD
+                  </button>
+                </>
+              );
+            })()}
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
