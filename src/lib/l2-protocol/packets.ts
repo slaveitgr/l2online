@@ -68,6 +68,17 @@ export class PacketReader {
     this.off += n;
     return out;
   }
+  u64(): bigint {
+    const lo = BigInt(this.u32());
+    const hi = BigInt(this.u32());
+    return lo | (hi << 32n);
+  }
+  f64(): number {
+    const view = new DataView(this.data.buffer, this.data.byteOffset + this.off, 8);
+    const v = view.getFloat64(0, true);
+    this.off += 8;
+    return v;
+  }
   str(): string {
     let s = "";
     for (;;) {
