@@ -166,8 +166,13 @@ export class L2GameClient {
         // (0x00/0x01) BEFORE the 8-byte seed. Classic opcode 0x00 places the
         // seed immediately after the opcode.
         let seedOffset = 1;
+        let result = 0x01;
         if (op === 0x2e && body.length >= 10 && (body[1] === 0x00 || body[1] === 0x01)) {
           seedOffset = 2;
+          result = body[1];
+        }
+        if (op === 0x2e && result !== 0x01) {
+          throw new Error(`Server rejected protocol ${this.opts.protocolRevision} (KeyPacket result=${result}). Expected 502.`);
         }
         if (body.length < seedOffset + 8) {
           throw new Error(`KeyPacket too short: ${body.length}B`);
@@ -183,6 +188,7 @@ export class L2GameClient {
       }
       return;
     }
+
 
     // After cipher: only care about CharSelectionInfo for now. The opcode
     // varies by chronicle (0x09 classic/HF, 0x13 retail GoD, 0x67 Mobius
