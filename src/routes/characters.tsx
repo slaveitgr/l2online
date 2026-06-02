@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
   getGameConnection,
@@ -10,7 +10,7 @@ import {
 export const Route = createFileRoute("/characters")({
   head: () => ({
     meta: [
-      { title: "Character Select — Lineage II Web" },
+      { title: "Select Character — Lineage II Web" },
       { name: "description", content: "Choose your hero and enter the world." },
     ],
   }),
@@ -49,7 +49,7 @@ function Characters() {
     });
   }
 
-  function enterWorld() {
+  function play() {
     const conn = getGameConnection();
     if (!conn || !conn.connected) {
       setGameConnection(null);
@@ -69,7 +69,7 @@ function Characters() {
       if (ev.type === "status") {
         appendLog(ev.message);
       } else if (ev.type === "char-selected") {
-        appendLog(`[GS] char-selected ${ev.name} (#${ev.objectId})`);
+        appendLog(`char-selected ${ev.name} (#${ev.objectId})`);
       } else if (ev.type === "in-world") {
         inWorldRef.current = true;
         appendLog(ev.message);
@@ -79,7 +79,7 @@ function Characters() {
         setEntering(false);
       } else if (ev.type === "closed") {
         if (!inWorldRef.current) {
-          setEnterError("Game server closed the connection during enter-world.");
+          setEnterError("Game server closed the connection.");
           setEntering(false);
           setGameConnection(null);
         }
@@ -89,111 +89,148 @@ function Characters() {
     conn.selectCharacter(slot);
   }
 
-  const logPanel = log.length > 0 ? (
-    <details className="text-[10px] font-mono text-muted-foreground panel rounded p-3 max-w-3xl mx-auto w-full" open={entering}>
-      <summary className="cursor-pointer hover:text-gold">Protocol log ({log.length})</summary>
-      <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words leading-relaxed">
-        {log.join("\n")}
-      </pre>
-    </details>
-  ) : null;
-
-  if (chars.length === 0) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-8 text-center">
-        <p className="font-display text-gold text-xl tracking-widest">NO CHARACTERS LOADED</p>
-        <p className="text-sm text-muted-foreground max-w-md">
-          Sign in and select a game server from the launcher to load your roster.
-        </p>
-        <Link to="/" className="text-xs px-4 py-2 border border-gold/40 rounded text-gold hover:bg-gold/10 transition">← Back to launcher</Link>
-        {logPanel}
-      </div>
-    );
+  function exitToLauncher() {
+    const conn = getGameConnection();
+    try { conn?.disconnect(); } catch { /* ignore */ }
+    setGameConnection(null);
+    navigate({ to: "/" });
   }
 
-  return (
-    <div className="min-h-screen flex flex-col">
-      <header className="border-b border-border/60 px-6 py-3 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-3 group">
-          <div className="w-8 h-8 rounded-sm bg-gradient-to-br from-primary to-blood flex items-center justify-center font-display text-primary-foreground font-bold">L</div>
-          <div>
-            <h1 className="font-display text-gold text-lg leading-none tracking-widest group-hover:brightness-125 transition">LINEAGE II</h1>
-            <p className="text-[10px] text-muted-foreground tracking-[0.3em] uppercase">Character Select</p>
-          </div>
-        </Link>
-        <Link to="/" className="text-xs text-muted-foreground hover:text-gold transition">← Back</Link>
-      </header>
+  const sel = chars.find((c) => c.id === selected) ?? chars[0] ?? null;
+  const slotCount = 7;
+  const slots = Array.from({ length: slotCount }, (_, i) => chars[i] ?? null);
 
-      <main className="flex-1 grid lg:grid-cols-[420px_1fr]">
-        {/* Roster */}
-        <aside className="border-r border-border/60 p-6 space-y-3 overflow-y-auto">
-          <p className="text-gold/80 font-mono text-xs tracking-[0.4em] uppercase mb-4">Heroes — {chars.length} / 7</p>
-          {chars.map((c) => {
-            const active = c.id === selected;
+  return (
+    <div className="fixed inset-0 overflow-hidden l2-bg-charsel">
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/70 pointer-events-none" />
+
+      {/* Top-left label */}
+      <div className="absolute top-3 left-4 text-sm text-foreground/85 font-display tracking-[0.25em]">
+        Select Character
+      </div>
+
+      {/* Right column slot list */}
+      <div className="absolute top-16 right-3 w-56 space-y-1.5">
+        {slots.map((c, i) => {
+          if (!c) {
             return (
               <button
-                key={c.id}
-                onClick={() => setSelected(c.id)}
-                className={`w-full text-left panel rounded p-4 flex items-center gap-4 transition-all ${
-                  active ? "ring-1 ring-gold border-gold" : "opacity-70 hover:opacity-100"
-                }`}
+                key={`empty-${i}`}
+                className="w-full h-12 l2-frame rounded flex items-center justify-center text-2xl text-muted-foreground/40 hover:text-gold transition"
               >
-                <div
-                  className="w-14 h-14 rounded shrink-0 flex items-center justify-center font-display text-2xl text-primary-foreground"
-                  style={{ background: `linear-gradient(135deg, ${c.color}, oklch(0.2 0.03 30))` }}
-                >
-                  {c.name[0]}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-display text-lg text-foreground truncate">{c.name}</p>
-                  <p className="text-xs text-muted-foreground font-mono">{c.race} · {c.klass}</p>
-                  <p className="text-xs text-gold mt-1">Lv. {c.level}</p>
-                </div>
+                +
               </button>
             );
-          })}
-          <button className="w-full border border-dashed border-border rounded p-4 text-sm text-muted-foreground hover:text-gold hover:border-gold-muted transition">
-            + Create new
-          </button>
-        </aside>
+          }
+          const active = c.id === selected;
+          return (
+            <button
+              key={c.id}
+              onClick={() => setSelected(c.id)}
+              className={`w-full l2-frame rounded p-2 flex items-center gap-2 text-left transition ${
+                active ? "ring-1 ring-gold" : "opacity-70 hover:opacity-100"
+              }`}
+              style={active ? { borderColor: "#c9a84c" } : undefined}
+            >
+              <div
+                className="w-9 h-9 rounded-sm shrink-0 flex items-center justify-center font-display text-base text-primary-foreground border border-border/60"
+                style={{ background: `linear-gradient(135deg, ${c.color}, oklch(0.2 0.03 30))` }}
+              >
+                {c.name[0]}
+              </div>
+              <div className="flex-1 min-w-0 leading-tight">
+                <p className="text-[10px] text-foreground truncate">Lv.{c.level}</p>
+                <p className="text-[9px] text-muted-foreground truncate">{c.klass}</p>
+                <p className="text-[10px] text-gold truncate">{c.name}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
 
-        {/* Preview */}
-        <section className="relative flex flex-col items-center justify-center p-12">
-          <div className="absolute inset-0 bg-gradient-to-br from-blood/20 via-background to-background" />
-          <div className="relative z-10 text-center">
-            {(() => {
-              const c = chars.find((x) => x.id === selected) ?? chars[0];
-              return (
-                <>
-                  <div
-                    className="w-48 h-48 mx-auto rounded-full border-4 border-gold-muted/40 flex items-center justify-center font-display text-7xl text-primary-foreground shadow-2xl"
-                    style={{ background: `radial-gradient(circle, ${c.color}, oklch(0.15 0.02 30))` }}
-                  >
-                    {c.name[0]}
-                  </div>
-                  <h2 className="font-display text-5xl text-foreground mt-8 tracking-wider">{c.name}</h2>
-                  <p className="text-gold mt-2 tracking-widest font-mono">{c.race.toUpperCase()} · {c.klass.toUpperCase()}</p>
-                  <p className="text-muted-foreground mt-1">Level {c.level}</p>
-                  <div className="gold-divider mt-8 max-w-xs mx-auto" />
-                  <button
-                    onClick={enterWorld}
-                    disabled={entering}
-                    className="mt-8 bg-gradient-to-b from-primary to-gold-muted text-primary-foreground font-display tracking-[0.3em] px-12 py-4 rounded border border-gold/40 hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-xl"
-                  >
-                    {entering ? "ENTERING…" : "ENTER WORLD"}
-                  </button>
-                  {enterError && (
-                    <div className="mt-4 text-xs text-blood bg-blood/10 border border-blood/40 rounded p-2 font-mono max-w-md mx-auto">
-                      {enterError}
-                    </div>
-                  )}
-                </>
-              );
-            })()}
+      {/* Center character silhouette (placeholder) */}
+      {sel && (
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[55%] pointer-events-none">
+          <div
+            className="w-56 h-72 rounded-full blur-2xl opacity-40"
+            style={{ background: `radial-gradient(circle, ${sel.color}, transparent 70%)` }}
+          />
+        </div>
+      )}
+
+      {/* Center-bottom stats panel */}
+      {sel && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 w-[320px]">
+          <div className="text-center mb-1">
+            <div className="text-gold text-sm font-display tracking-widest">{sel.name}</div>
+            <div className="text-[10px] text-muted-foreground">Lv.{sel.level} {sel.klass}</div>
           </div>
-        </section>
-      </main>
-      {logPanel && <div className="border-t border-border/60 p-4">{logPanel}</div>}
+          <div className="l2-frame rounded px-3 py-2 space-y-1 text-[9px] font-mono">
+            <StatRow label="HP" value={`${sel.hp}/${sel.maxHp}`} pct={sel.hp / sel.maxHp} color="oklch(0.55 0.22 25)" />
+            <StatRow label="MP" value={`${sel.mp}/${sel.maxMp}`} pct={sel.mp / sel.maxMp} color="oklch(0.55 0.18 250)" />
+            <StatRow label="VP" value="" pct={0} color="oklch(0.6 0.18 30)" />
+            <StatRow label="XP" value={`${sel.exp}`} pct={0.83} color="oklch(0.55 0.04 70)" />
+            <div className="flex items-center justify-between pt-0.5">
+              <span className="text-muted-foreground w-7">SP</span>
+              <span className="flex-1 text-foreground/80 px-2">{sel.sp.toLocaleString()}</span>
+              <span className="text-muted-foreground">Rep. <span className="text-foreground/80">0</span></span>
+            </div>
+          </div>
+          <div className="flex justify-center mt-3">
+            <button onClick={play} disabled={entering} className="l2-button" style={{ minWidth: "8rem" }}>
+              {entering ? "…" : "Play"}
+            </button>
+          </div>
+          {enterError && (
+            <div className="mt-2 text-[10px] text-blood bg-blood/10 border border-blood/40 rounded px-2 py-1 font-mono text-center">
+              {enterError}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Bottom-left actions */}
+      <div className="absolute bottom-12 left-3 flex flex-col items-start gap-0.5">
+        <button className="l2-corner-link">Credits</button>
+        <button onClick={exitToLauncher} className="l2-corner-link">Exit</button>
+      </div>
+
+      {/* Bottom-right actions */}
+      <div className="absolute bottom-12 right-3 flex items-center gap-3">
+        <button className="l2-corner-link">Create</button>
+        <button className="l2-corner-link">Delete</button>
+      </div>
+
+      {/* Protocol log (only while entering or on error) */}
+      {(entering || enterError || log.length > 0) && (
+        <details className="absolute bottom-24 left-3 max-w-sm l2-frame rounded px-3 py-2 text-[10px] font-mono text-muted-foreground" open={entering}>
+          <summary className="cursor-pointer hover:text-gold tracking-widest">PROTOCOL LOG ({log.length})</summary>
+          <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words leading-relaxed">
+            {log.join("\n")}
+          </pre>
+        </details>
+      )}
+
+      {/* Footer */}
+      <div className="l2-footer">
+        <span className="font-display tracking-[0.3em] text-foreground/80">NC</span>
+        <span className="sep">|</span>
+        <span className="font-display tracking-[0.4em] text-foreground/80">LINEAGE II</span>
+        <span className="sep">|</span>
+        <span>4game.com</span>
+      </div>
+    </div>
+  );
+}
+
+function StatRow({ label, value, pct, color }: { label: string; value: string; pct: number; color: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-muted-foreground w-7">{label}</span>
+      <div className="l2-bar flex-1" style={{ ["--bar-color" as string]: color } as React.CSSProperties}>
+        <span style={{ width: `${Math.max(0, Math.min(1, pct)) * 100}%` }} />
+      </div>
+      <span className="text-foreground/80 w-20 text-right">{value}</span>
     </div>
   );
 }
