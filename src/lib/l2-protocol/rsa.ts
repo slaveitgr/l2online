@@ -37,37 +37,35 @@ function modPow(base: bigint, exp: bigint, mod: bigint): bigint {
 }
 
 /**
- * Undo the L2 scramble: swap nibble pairs at fixed positions so the modulus
- * becomes a real 1024-bit big-endian integer.
+ * Undo the L2J Mobius modulus scramble. The server applies these four steps
+ * (`ScrambledKeyPair.scrambleModulus`) before sending the modulus inside Init:
  *
- * The scramble used by NCSoft (and verified by every open-source L2J client):
- *   for i in 0..3:  scrambled[0x00 + i] ^= scrambled[0x4d + i]
- *   for i in 0..3:  swap scrambled[0x00 + i] <-> scrambled[0x4d + i]  (no — see code)
+ *   1. swap m[0x00..0x04]   <->  m[0x4d..0x51]            (4 bytes)
+ *   2. m[i]      ^= m[0x40+i]   for i in 0..0x40
+ *   3. m[0x0d+i] ^= m[0x34+i]   for i in 0..4
+ *   4. m[0x40+i] ^= m[i]        for i in 0..0x40
  *
- * Implementation here follows the L2J `ScrambledKeyPair` inverse.
+ * Inverse — apply in reverse order:
  */
 export function unscrambleModulus(scrambled: Uint8Array): Uint8Array {
   if (scrambled.length !== 128) throw new Error(`Expected 128-byte modulus, got ${scrambled.length}`);
   const k = new Uint8Array(scrambled);
 
-  // step 4: xor bytes 0x00..0x03 with bytes 0x4d..0x50
-  for (let i = 0; i < 4; i++) k[0x00 + i] ^= k[0x4d + i];
-  // step 3: xor bytes 0x4d..0x50 with bytes 0x00..0x03
-  for (let i = 0; i < 4; i++) k[0x4d + i] ^= k[0x00 + i];
-  // step 2: swap bytes 0x00..0x03 with bytes 0x4d..0x50
+  // inv step 4: m[0x40+i] ^= m[i]
+  for (let i = 0; i < 0x40; i++) k[0x40 + i] ^= k[i];
+  // inv step 3: m[0x0d+i] ^= m[0x34+i]
+  for (let i = 0; i < 4; i++) k[0x0d + i] ^= k[0x34 + i];
+  // inv step 2: m[i] ^= m[0x40+i]
+  for (let i = 0; i < 0x40; i++) k[i] ^= k[0x40 + i];
+  // inv step 1: swap m[0x00..0x04] <-> m[0x4d..0x51]
   for (let i = 0; i < 4; i++) {
     const t = k[0x00 + i];
     k[0x00 + i] = k[0x4d + i];
     k[0x4d + i] = t;
   }
-  // step 1: swap blocks 0x00..0x40 with 0x40..0x80
-  for (let i = 0; i < 0x40; i++) {
-    const t = k[0x00 + i];
-    k[0x00 + i] = k[0x40 + i];
-    k[0x40 + i] = t;
-  }
   return k;
 }
+
 
 /** Encrypt a 128-byte plaintext block with RSA (e=65537) using the unscrambled modulus. */
 export function rsaEncryptBlock(plaintext: Uint8Array, modulus: Uint8Array): Uint8Array {

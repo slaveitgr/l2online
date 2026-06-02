@@ -120,3 +120,36 @@ export function verifyChecksum(body: Uint8Array): boolean {
   }
   return view.getUint32(body.length - 4, true) === chk;
 }
+
+/**
+ * Undo `NewCrypt.encXORPass` (L2J). Forward algorithm:
+ *
+ *   ecx = key
+ *   for pos in 4..size-8 step 4:
+ *     edx_orig = read_u32(pos)
+ *     ecx += edx_orig
+ *     write_u32(pos, edx_orig ^ ecx)
+ *   write_u32(size-8, ecx)   // final accumulator
+ *
+ * Inverse — walk BACKWARDS, accumulator known (read from size-8):
+ *
+ *   ecx = read_u32(size-8)
+ *   for pos in (size-12) .. 4 step -4:
+ *     edx_enc = read_u32(pos)
+ *     edx_orig = edx_enc ^ ecx
+ *     ecx -= edx_orig
+ *     write_u32(pos, edx_orig)
+ *
+ * Operates in place on `buf` between bytes [offset, offset+size).
+ */
+export function decXORPass(buf: Uint8Array, offset: number, size: number): void {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  let ecx = view.getUint32(offset + size - 8, true);
+  for (let pos = offset + size - 12; pos >= offset + 4; pos -= 4) {
+    const edxEnc = view.getUint32(pos, true);
+    const edxOrig = (edxEnc ^ ecx) >>> 0;
+    ecx = (ecx - edxOrig) >>> 0;
+    view.setUint32(pos, edxOrig, true);
+  }
+}
+
