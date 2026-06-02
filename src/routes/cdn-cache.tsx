@@ -86,7 +86,27 @@ function CdnCachePage() {
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
   const [rangeTests, setRangeTests] = useState<RangeTestResult[]>([]);
   const [rangeTesting, setRangeTesting] = useState(false);
+  const [mount, setMount] = useState<MountStatus>({ mounted: false, name: null, supported: false });
   const abortRef = useRef<AbortController | null>(null);
+
+  async function refreshMount() {
+    try { setMount(await getMountStatus()); } catch { /* noop */ }
+  }
+
+  async function onMountFolder() {
+    setError(null);
+    try {
+      const h = await pickFolder();
+      setMount({ mounted: true, name: h.name, supported: true });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function onUnmount() {
+    await unmount();
+    setMount({ mounted: false, name: null, supported: true });
+  }
 
   async function onRangeTest() {
     setRangeTesting(true);
