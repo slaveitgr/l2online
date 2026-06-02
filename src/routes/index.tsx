@@ -28,6 +28,8 @@ function Launcher() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusLog, setStatusLog] = useState<string[]>([]);
+  const [muted, setMuted] = useState(true);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     // Clear any stale log when landing on launcher
@@ -155,16 +157,35 @@ function Launcher() {
     <div className="fixed inset-0 overflow-hidden l2-bg-login">
       {/* Background video */}
       <video
+        ref={videoRef}
         autoPlay
-        muted
         loop
         playsInline
         preload="auto"
+        muted={muted}
         className="absolute inset-0 w-full h-full object-cover pointer-events-none"
         src={loginVideo.url}
       />
       <div className="absolute inset-0 bg-black/50 pointer-events-none" />
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/70 pointer-events-none" />
+
+      {/* Sound toggle */}
+      <button
+        type="button"
+        onClick={() => {
+          const v = videoRef.current;
+          if (!v) return;
+          const next = !muted;
+          v.muted = next;
+          if (!next) v.play().catch(() => {});
+          setMuted(next);
+        }}
+        className="absolute top-3 right-3 z-20 l2-corner-link pointer-events-auto"
+        aria-label={muted ? "Unmute" : "Mute"}
+      >
+        {muted ? "🔇 Sound Off" : "🔊 Sound On"}
+      </button>
+
 
       {/* Center modal — Login or Server select */}
       <div className="absolute inset-0 flex items-center justify-center">
