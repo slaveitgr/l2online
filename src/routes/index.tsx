@@ -218,7 +218,7 @@ function Launcher() {
                   </option>
                 ))}
               </select>
-              <span className="text-[10px] text-gold tracking-widest px-2">LINEAGE II</span>
+              <span className="text-[10px] text-gold tracking-widest px-2">L2SLAVE</span>
               <span className="text-[10px] text-muted-foreground tracking-widest">Light</span>
             </div>
             <div className="flex justify-center gap-2 pt-1">
