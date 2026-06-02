@@ -158,12 +158,21 @@ export class L2GameClient {
     // key). Classic C4/C6 uses opcode 0x00 with the same layout.
     if (!this.gotKey) {
       try {
-        const r = new PacketReader(body);
-        const op = r.u8();
+        const op = body[0];
         if (op !== 0x2e && op !== 0x00) {
           throw new Error(`expected KeyPacket opcode 0x2E or 0x00, got 0x${op.toString(16)}`);
         }
-        const seed = r.bytes(8);
+        // Mobius/L2J KeyPacket: after opcode 0x2E there's a flag byte
+        // (0x00/0x01) BEFORE the 8-byte seed. Classic opcode 0x00 places the
+        // seed immediately after the opcode.
+        let seedOffset = 1;
+        if (op === 0x2e && body.length >= 10 && (body[1] === 0x00 || body[1] === 0x01)) {
+          seedOffset = 2;
+        }
+        if (body.length < seedOffset + 8) {
+          throw new Error(`KeyPacket too short: ${body.length}B`);
+        }
+        const seed = body.slice(seedOffset, seedOffset + 8);
         this.crypt = new GameCrypt(seed);
         this.gotKey = true;
         this.emit({ type: "key-ok" });
