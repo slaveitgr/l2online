@@ -82,8 +82,41 @@ function CdnCachePage() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<PrefetchProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
+  const [rangeTests, setRangeTests] = useState<RangeTestResult[]>([]);
+  const [rangeTesting, setRangeTesting] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  async function onRangeTest() {
+    setRangeTesting(true);
+    setError(null);
+    try {
+      const m = await loadManifest();
+      // pick first .ukx and first .utx, plus a small system file as control
+      const ukx = m.files.find((f) => f.path.toLowerCase().endsWith(".ukx") && f.size > 100_000);
+      const utx = m.files.find((f) => f.path.toLowerCase().endsWith(".utx") && f.size > 100_000);
+      const sys = m.files.find((f) => f.path.toLowerCase().startsWith("system/") && f.size > 1024);
+      const targets = [ukx, utx, sys].filter(Boolean) as ManifestFile[];
+      const results: RangeTestResult[] = [];
+      for (const f of targets) {
+        try {
+          results.push(await runRangeTest(f));
+        } catch (e) {
+          results.push({
+            file: f.path, size: f.size, durationMs: 0,
+            head: { status: 0, contentLength: null, acceptRanges: null, cors: null, ok: false },
+            range: { status: 0, contentRange: null, bytesReceived: 0, expectedBytes: 0, cors: null, ok: false },
+          });
+          console.error("Range test failed", f.path, e);
+        }
+      }
+      setRangeTests(results);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRangeTesting(false);
+    }
+  }
+
 
   async function refreshAll() {
     try {
