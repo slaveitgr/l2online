@@ -199,6 +199,37 @@ function CdnCachePage() {
       </header>
 
       <main className="flex-1 max-w-5xl w-full mx-auto p-6 space-y-6">
+        {/* Local folder mount */}
+        <section className="panel p-4 rounded flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <p className="text-[10px] text-muted-foreground font-mono tracking-[0.3em] uppercase">Local folder mount</p>
+            <p className="text-sm font-mono mt-1">
+              {mount.mounted ? (
+                <><span className="text-gold">●</span> Mounted: <span className="text-foreground">{mount.name}</span> <span className="text-muted-foreground">— served on demand, zero IndexedDB copy</span></>
+              ) : mount.supported ? (
+                <span className="text-muted-foreground">Not mounted — Mount your local L2 folder to skip CDN downloads entirely.</span>
+              ) : (
+                <span className="text-blood">Browser does not support File System Access API (use Chrome/Edge).</span>
+              )}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            {mount.mounted ? (
+              <button onClick={onUnmount} className="text-xs px-3 py-2 border border-border hover:border-blood hover:text-blood rounded font-mono uppercase tracking-widest">
+                Unmount
+              </button>
+            ) : (
+              <button
+                onClick={onMountFolder}
+                disabled={!mount.supported}
+                className="text-xs px-4 py-2 border border-gold/40 text-gold hover:bg-gold/10 rounded font-mono uppercase tracking-widest disabled:opacity-30"
+              >
+                Mount local folder
+              </button>
+            )}
+          </div>
+        </section>
+
         {/* Overall stats */}
         <section className="panel p-6 rounded">
           <div className="flex items-end justify-between mb-4">
