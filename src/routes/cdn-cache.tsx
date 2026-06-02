@@ -268,6 +268,47 @@ function CdnCachePage() {
           </section>
         )}
 
+        {/* Range/CORS test results */}
+        {rangeTests.length > 0 && (
+          <section className="panel rounded overflow-hidden">
+            <div className="px-4 py-3 bg-input/50 flex items-center justify-between">
+              <p className="text-xs font-display tracking-[0.3em] text-gold uppercase">CORS / Range Probe</p>
+              <p className="text-[10px] font-mono text-muted-foreground">
+                HEAD + Range: bytes=0-1023 via /api/cdn proxy
+              </p>
+            </div>
+            <div className="divide-y divide-border/40">
+              {rangeTests.map((r) => {
+                const allOk = r.head.ok && r.range.ok;
+                return (
+                  <div key={r.file} className="p-4 font-mono text-xs space-y-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="truncate text-foreground/90" title={r.file}>{r.file}</span>
+                      <span className={allOk ? "text-gold" : "text-blood"}>
+                        {allOk ? "✓ PASS" : "✗ FAIL"} · {r.durationMs}ms
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-muted-foreground">
+                      <div>
+                        <span className="text-foreground/60">HEAD</span> {r.head.status}
+                        {" · "}accept-ranges: <span className={r.head.acceptRanges === "bytes" ? "text-gold" : "text-blood"}>{r.head.acceptRanges ?? "missing"}</span>
+                        {" · "}len: {r.head.contentLength ?? "—"}
+                        {" · "}CORS: <span className={r.head.cors ? "text-gold" : "text-blood"}>{r.head.cors ?? "missing"}</span>
+                      </div>
+                      <div>
+                        <span className="text-foreground/60">GET 206</span> {r.range.status}
+                        {" · "}got {r.range.bytesReceived}/{r.range.expectedBytes}B
+                        {" · "}content-range: <span className={r.range.contentRange ? "text-gold" : "text-blood"}>{r.range.contentRange ?? "missing"}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+
         {error && (
           <section className="panel p-4 rounded border border-blood/40 text-sm text-blood font-mono">
             {error}
