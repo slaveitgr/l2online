@@ -66,10 +66,20 @@ function colorFromName(name: string): string {
   return `oklch(0.55 0.15 ${hue})`;
 }
 
-// Mobius 12.3 CharSelectionInfo per-char paperdoll array lengths.
-// If you change Mobius build, re-count PAPERDOLL_ORDER / _VISUAL_ID.
-const PAPERDOLL_ORDER_LEN = 60;
-const PAPERDOLL_VISUAL_LEN = 9;
+// CharSelectionInfo per-char "tail": the number of bytes from the end of the
+// `level` field to the end of one character's block. Everything before `level`
+// is read explicitly (incl. the two variable-length strings name/accountName),
+// so this tail is CONSTANT across all characters for a given server build.
+//
+// The pure 12.3 Superion source produces 519 here, but slave.gr's build runs
+// 24 bytes shorter (some version-gated "// 493" trailing fields are absent),
+// so the real value is 495. Derived from the live packet:
+//   tail = bodyLen - 17(header) - 122(prefix incl strings up to level)
+//        = 634 - 17 - 122 = 495
+// If you ever see "per-char layout mismatch" again, recompute from a fresh
+// single-character CharSelectionInfo: tail = bodyLen - 17 - (122 with a
+// 9-char name) and adjust for your actual name/account lengths.
+const CHAR_TAIL_AFTER_LEVEL = 495;
 
 export class L2GameClient {
   private ws: WebSocket | null = null;
@@ -327,6 +337,7 @@ export class L2GameClient {
 
       const chars: GameCharacter[] = [];
       for (let i = 0; i < count; i++) {
+        // --- per-char prefix: everything up to and including `level` ---
         const name = r.str();
         const objectId = r.u32();
         r.str(); // accountName
@@ -340,58 +351,12 @@ export class L2GameClient {
         r.skip(12); // x, y, z  (3× int)
         r.skip(8); // currentHp (double)
         r.skip(8); // currentMp (double)
-        r.skip(8); // FIX: sp is LONG (8), was u32
+        r.skip(8); // sp (long)
         r.skip(8); // exp (long)
-        r.skip(8); // FIX: expPercent (double) — was missing
+        r.skip(8); // expPercent (double)
         const level = r.u32();
-        r.skip(4); // reputation
-        r.skip(4); // pkKills
-        r.skip(4); // pvpKills
-        r.skip(4 * 9); // 9 zero ints (incl. 2 Ertheia)
-        r.skip(4 * PAPERDOLL_ORDER_LEN); // paperdoll item ids (60)
-        r.skip(4 * PAPERDOLL_VISUAL_LEN); // paperdoll visual ids (9)
-        r.skip(2 * 5); // 5 enchant shorts (chest/legs/head/gloves/feet)
-        r.skip(4); // hairStyle
-        r.skip(4); // hairColor
-        r.skip(4); // face
-        r.skip(8); // maxHp (double)
-        r.skip(8); // maxMp (double)
-        r.skip(4); // deleteTimer
-        r.skip(4); // 0
-        r.skip(4); // -1
-        r.skip(4); // classId
-        r.skip(4); // active (i == activeId)
-        r.skip(1); // rhand enchant (byte)
-        r.skip(4 * 3); // augment option1/2/3
-        r.skip(4 * 4); // 4 zero ints (incl. transformation)
-        r.skip(4 * 4); // pet npcId/level/food/foodLevel
-        r.skip(8); // pet HP (double)
-        r.skip(8); // pet MP (double)
-        r.skip(4); // vitalityPoints
-        r.skip(4); // vitalityPercent
-        r.skip(4); // vitalityItemsUsed
-        r.skip(4); // active2 (accessLevel != -100)
-        r.skip(1); // noble (byte)
-        r.skip(1); // heroGlow (byte)
-        r.skip(1); // hairAccessory (byte)
-        r.skip(4); // banTimeLeft
-        r.skip(4); // lastPlayTime
-        r.skip(1); // 338 byte
-        r.skip(4); // dkColor
-        r.skip(4); // 0
-        r.skip(1); // 362 vanguard mount (byte)
-        r.skip(3); // 464 (3 bytes)
-        r.skip(8 * 4); // 493 (4 longs)
-        r.skip(4); // 493 (int)
 
-        if (r.remaining < 0) {
-          this.emit({
-            type: "status",
-            message: `[GS] char #${i} overran buffer — per-char layout mismatch`,
-          });
-          break;
-        }
-
+        // Surface the char immediately — we already have all the UI needs.
         chars.push({
           id: objectId.toString(16),
           name,
@@ -400,6 +365,18 @@ export class L2GameClient {
           level,
           color: colorFromName(name),
         });
+
+        // --- skip the constant tail to reach the next char (if any) ---
+        if (i < count - 1) {
+          r.skip(CHAR_TAIL_AFTER_LEVEL);
+          if (r.remaining < 0) {
+            this.emit({
+              type: "status",
+              message: `[GS] char #${i} tail overran — CHAR_TAIL_AFTER_LEVEL may need tuning for this build`,
+            });
+            break;
+          }
+        }
       }
 
       this.emit({ type: "status", message: `[GS] parsed ${chars.length} character(s)` });
