@@ -112,7 +112,9 @@ export class L2LoginClient {
       this.ws = ws;
 
       ws.onopen = () => this.emit({ type: "status", message: "WebSocket open, waiting for TCP connect…" });
-      ws.onclose = (ev) => this.settle({ type: "closed", ...({} as never) }, `closed code=${ev.code} reason=${ev.reason}`);
+      ws.onclose = (ev) => {
+        if (!this.settled) this.settle({ type: "closed" }, `closed code=${ev.code} reason=${ev.reason}`);
+      };
       ws.onerror = () => this.settle({ type: "error", error: "WebSocket error" });
       ws.onmessage = (ev) => this.onMessage(ev.data);
     });
