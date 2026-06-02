@@ -199,9 +199,13 @@ export class L2GameClient {
 
   private sendFrame(plainBody: Uint8Array, encrypted: boolean) {
     if (!this.ws) return;
-    const payload = encrypted
-      ? this.crypt!.encrypt(appendChecksumAndPad(plainBody))
-      : plainBody;
+    // Mobius GameServer: raw XOR stream cipher, no checksum, no padding.
+    // (Login server uses Blowfish which DOES require checksum+pad — that lives
+    // in login-client.ts.)
+    const payload = encrypted ? this.crypt!.encrypt(plainBody) : plainBody;
+    if (encrypted) {
+      this.emit({ type: "status", message: `[GS] → enc ${payload.length}B ${hex(payload, 16)}` });
+    }
     const total = payload.length + 2;
     const out = new Uint8Array(total);
     out[0] = total & 0xff;
