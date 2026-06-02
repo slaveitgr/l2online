@@ -1,56 +1,84 @@
-## Goal
-Part B από το spec: σύνδεση του enter-world handshake στο UI. Ο `L2GameClient` υποστηρίζει ήδη `keepAlive`, `selectCharacter`, `setEventHandler`, `disconnect` και τα `getGameConnection/setGameConnection` singletons — απομένει να τα κουμπώσουμε στα 3 routes.
 
-Part C (rendering pipeline από Lineage2JS) είναι μακροπρόθεσμος οδικός χάρτης — δεν το αγγίζουμε σε αυτό το loop.
+# Πιστή αναπαραγωγή του αυθεντικού L2 UI
 
-## Changes
+Στόχος: τα τρία screens (Login / Server Select / Character Select) να μοιάζουν με τον πραγματικό client αντί για το τωρινό "fantasy launcher" look.
 
-### 1) `src/routes/index.tsx` — κράτα ζωντανή τη GS μετά το roster
-- Import `setGameConnection` από `@/lib/l2-protocol/game-client`.
-- Στο `onEnterWorld`, στο `new L2GameClient({...})` πρόσθεσε `keepAlive: true`.
-- Όταν `gr.type === "characters"`: κάλεσε `setGameConnection(gs)` **πριν** το `navigate({ to: "/characters" })`.
-- Σε `gr.type === "error" | "closed"` paths: μην κρατάς stale singleton — κάλεσε `setGameConnection(null)`.
-- `login.close()` παραμένει όπως είναι (κλείνουμε μόνο τον LS).
+## Κοινά design tokens (src/styles.css)
 
-### 2) `src/routes/characters.tsx` — ENTER WORLD μέσω της ζωντανής GS
-- Import `getGameConnection`, `setGameConnection` και `type GameEvent`.
-- State: `entering: boolean`, `enterError: string | null`, `enterLog: string[]` (live append).
-- Νέα `enterWorld()` (αντικαθιστά το `navigate({ to: "/world" })` του κουμπιού):
-  - `const conn = getGameConnection()`. Αν `!conn || !conn.connected` → καθάρισε `sessionStorage` σχετικά και `navigate({ to: "/" })` με μήνυμα «session lost».
-  - `const slot = Math.max(0, chars.findIndex(c => c.id === selected))`.
-  - `conn.setEventHandler(ev => { ... })`:
-    - `status` → push σε `enterLog` + persist στο `sessionStorage` `l2_gslog`.
-    - `char-selected` → απλώς log.
-    - `in-world` → `navigate({ to: "/world" })` (το singleton μένει· ο `/world` το αναλαμβάνει).
-    - `error` → `setEnterError(ev.error)`, `setEntering(false)`.
-    - `closed` → αν δεν έχουμε ήδη φτάσει σε in-world, treat ως error.
-  - `setEntering(true); conn.selectCharacter(slot);`
-- Κουμπί ENTER WORLD: `disabled={entering}`, label «ENTERING…» όταν `entering`.
-- Render `enterError` κάτω από το κουμπί (ίδιο styling με τα υπόλοιπα error blocks του project).
-- Το υπάρχον `logPanel` (από `sessionStorage`) μένει· επιπλέον δείξε τα live `enterLog` lines στο ίδιο panel ώστε να φαίνεται η ροή `CharacterSelect → CharSelected → EnterWorld → world packets`.
+- Fullscreen artwork ως background (cover, no panels χρώματος), χωρίς το radial gradient που υπάρχει σήμερα στο body.
+- Νέο `.l2-frame` utility: μικρό modal με μαύρο gradient fill (`oklch(0.10 0 0 / 0.85)`), 1px gold border (`#a88a4a`), inset highlight, ελαφρύ outer glow — αυτό το "etched bronze plate" frame που έχουν όλα τα L2 panels.
+- Νέο `.l2-button`: pill-shaped, σκοτεινό μπλε-μαύρο gradient με thin gold stroke, μικρό uppercase serif text (Cinzel ή system serif), hover = brighten + subtle gold glow.
+- Νέο `.l2-input`: ίδιο pill frame αλλά κενό κέντρο, centered placeholder text σε muted gold.
+- Footer bar: λεπτή σκούρα μπάρα κάτω-κάτω με `NC | LINEAGE II` + `4game.com` + copyright (όπως στα screenshots).
+- Side menu (κάτω-δεξιά): mini vertical list `New Account / Lost Account / Links / Settings` με μικρά iconάκια, ultra-thin type.
 
-### 3) `src/routes/world.tsx` — προσδέσου στη ζωντανή σύνδεση
-- Import `getGameConnection` και `type GameEvent`.
-- `useEffect` mount:
-  - `const conn = getGameConnection();`
-  - Αν `!conn || !conn.connected` → `navigate({ to: "/" })` (no live world, return to launcher).
-  - Διαφορετικά `conn.setEventHandler(ev => { ... })` — για τώρα απλό logging των `world-packet` σε ένα μικρό overlay (συν δικό μας `console.log("[GS world]", ev)`). World-state parsing είναι σκόπιμα out-of-scope.
-- Cleanup: το «Exit» link (header) πρέπει να καλεί `conn.disconnect()` + `setGameConnection(null)` πριν το navigation στο `/characters`. Το αλλάζουμε από `<Link>` σε `<button onClick={...}>` με ίδιο styling.
-- Το unmount cleanup του `useEffect` ΔΕΝ καλεί `disconnect()` — αυτό θα έκλεινε τη σύνδεση σε κάθε hot-reload / route change. Disconnect μόνο μέσω του Exit κουμπιού.
+## 1. Login screen (`src/routes/index.tsx`)
+
+Refactor μόνο της παρουσίασης — η login logic, οι l2-bridge calls, και το protocol log μένουν ίδια.
+
+- Fullscreen background: το "chained beast" artwork (gradient placeholder από CSS αν δεν υπάρχει asset, με slot για να μπει αργότερα real image).
+- Κεντρικά κάτω από το μέσο: μικρό `l2-frame` με δύο inputs (Username, Password) στοιβαγμένα, και δύο buttons δίπλα-δίπλα `Log In` / `Exit`. Πολύ compact (max-w ~360px).
+- Πάνω από τα inputs: server/status indicators (τωρινό status badge), σε μία γραμμή με thin type.
+- Κάτω-δεξιά corner menu (New Account / Lost Account / Links / Settings) — links σε εξωτερικά docs ή noop για τώρα.
+- Footer bar.
+- Protocol log: μετακινείται σε collapsible κάτω-αριστερά (τύπου `<details>` με `Credits/Exit` style), για να μη χαλάει την εικόνα.
+
+## 2. Server Select (νέο intermediate state ή dialog στο index)
+
+Στο πραγματικό client, μετά το login εμφανίζεται μικρό dialog `Server: [list]  [OK] [Cancel]`. Σήμερα η εφαρμογή πάει κατευθείαν από login → characters. 
+
+- Προσθήκη state `phase: "login" | "server-select" | "loading"` στο `index.tsx`.
+- Όταν έρθει η server list, εμφανίζεται modal `l2-frame` πάνω από το ίδιο background: label `Server`, dropdown με τα ονόματα servers, ετικέτες `Lineage 2` / `Light` indicators, `OK` / `Cancel` buttons.
+- `OK` → προχωράει στο GS handshake (όπως τώρα γίνεται αυτόματα).
+- `Cancel` → επιστροφή στο login frame.
+
+## 3. Character Select (`src/routes/characters.tsx`)
+
+Πλήρης οπτική αναμόρφωση για να μοιάζει με το screenshot #1.
+
+Layout:
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Select Character                                            │  ← top-left label, no header bar
+│                                                             │
+│         [FULLSCREEN CITY/CHARACTER ARTWORK]      ┌────────┐ │
+│                                                  │ slot 1 │ │ ← right column
+│                                                  │ slot 2 │ │   character cards
+│                                                  │   +    │ │   (compact, gold-bordered)
+│                                                  │   +    │ │
+│                                                  └────────┘ │
+│                                                             │
+│                    ┌──────────────────┐                     │
+│                    │ Name             │                     │
+│                    │ Lv.X Class       │                     │
+│                    │ HP ▓▓▓▓ MP ▓▓▓▓  │                     │  ← center-bottom stats panel
+│                    │ XP ▓▓▓▓ SP 0     │                     │
+│                    └──────────────────┘                     │
+│                          [ Play ]                           │
+│ Credits                                       Create Delete │  ← bottom corners
+│ Exit                                                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Συγκεκριμένα:
+- Background: fullscreen artwork (city skyline placeholder, με slot για asset).
+- Top-left: μικρό text "Select Character" (όχι ολόκληρο header bar).
+- Right column (w-64): vertical stack από character slots. Selected = highlighted gold border με thumbnail + `Lv.XX` + class + name. Empty slots = `+` πλακάκι.
+- Bottom-center: compact stats panel (`l2-frame`) με HP/MP/VP/XP/SP bars (HP=κόκκινο, MP=μπλε, VP=πορτοκαλί, XP=γκρι), και name/level/class από πάνω.
+- Bottom-center κάτω από stats: `[ Play ]` button (l2-button, large).
+- Bottom-left: `Credits` και `Exit` plain text buttons (small, low-key).
+- Bottom-right: `Create` και `Delete` plain text buttons.
+- Αφαίρεση: του τωρινού huge avatar circle, του gradient overlay, του "ENTERING…" button — γίνεται plain `Play` με loading state.
+- Protocol log: collapsible `<details>` που εμφανίζεται μόνο while entering ή on error (κάτω-αριστερά πάνω από Credits/Exit).
 
 ## Out of scope
-- Part C (Lineage2JS rendering pipeline) — ξεχωριστό roadmap, πολλές φάσεις.
-- World-state parsing (UserInfo/NpcInfo). Για τώρα μόνο logging των world packets.
-- Keep-alive responses (RequestManorList, validatePosition, pings) — αρκούν για το πρώτο spawn handshake όπως λέει το spec.
 
-## Verification
-1. Login → επιλογή server → ENTER WORLD στο launcher → roster φορτώνει, μεταβαίνει σε `/characters`. Το GS socket παραμένει ανοιχτό (DevTools → Network → WS → l2-bridge: open).
-2. Στο `/characters`, ENTER WORLD πάνω σε χαρακτήρα → στο Protocol log φαίνεται:
-   - `[GS] → CharacterSelect slot=N`
-   - `[GS] CharSelected "<name>" @ x,y,z`
-   - `[GS] → EnterWorld`
-   - `[GS] EnterWorld accepted — receiving world state`
-   - `[GS] (world) ← op 0x..` (UserInfo κ.λπ.)
-3. Auto-redirect σε `/world`. Το world packet log συνεχίζει να γεμίζει στο overlay.
-4. Click «Exit» → socket κλείνει (`[GS] socket closed`), redirect στο `/characters`.
-5. Hard refresh στο `/characters` ή `/world` → singleton χάθηκε → redirect στο `/` με κατάλληλο μήνυμα (όχι crash).
+- Δεν αλλάζει καμία logic σε login/GS handshake/protocol parsing.
+- Δεν αλλάζει το `/world` route.
+- Δεν φέρνουμε πραγματικά game assets (artworks/icons) — αφήνουμε placeholders/CSS gradients με σαφή slots ώστε να γίνει drop-in αργότερα.
+
+## Technical notes
+
+- Όλες οι νέες κλάσεις (`l2-frame`, `l2-button`, `l2-input`, `l2-stat-bar`) μπαίνουν στο `@layer utilities` του `src/styles.css` ώστε να χρησιμοποιούν τα ήδη υπάρχοντα tokens (gold, blood, panel).
+- Καμία νέα dependency.
+- 3 αρχεία αλλάζουν: `src/styles.css`, `src/routes/index.tsx`, `src/routes/characters.tsx`.
