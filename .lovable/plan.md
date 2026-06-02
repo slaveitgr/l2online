@@ -1,31 +1,47 @@
-## Πρόβλημα
+## Διάγνωση
 
-Το login server flow τελειώνει σωστά και πέρνεις PlayOk. Μετά το client προσπαθεί να ανοίξει 2ο WebSocket στο `/api/l2-bridge?host=176.92.69.220&port=7777` για τον Game Server, αλλά το bridge απαντάει **HTTP 403 "Host not allowed"** γιατί το `ALLOWED_HOSTS` περιέχει μόνο `l2server.slave.gr`. Ο browser βλέπει αποτυχημένο WS upgrade και δεν εμφανίζει τίποτα άλλο στο log.
+Ο GS handshake φτάνει μέχρι το KeyPacket, αλλά μετά το `AuthLogin` ο server κάνει immediate close. Αυτό σημαίνει ότι το encrypted AuthLogin που στείλαμε ήταν garbage — δηλαδή **λάθος cipher seed**.
 
-Το port (7777) είναι σωστό — προέρχεται από το ServerList packet (`61 1e 00 00` = 0x1e61 = 7777), όχι hardcoded.
+Mobius KeyPacket layout (το πιο πιθανό για slave.gr):
+```
+u8  opcode = 0x2E
+u8  ok     = 0x00 (status byte — εδώ ήταν 0x00 αλλά συνέχισε να στέλνει key)
+u8[8] cipherKey
+u32 ...  // flags (sessionId, gg, etc.)
+```
 
-## Λύση (1 αρχείο)
+Το ταίριασμα των επόμενων bytes επιβεβαιώνει: `00 00 00 00 01 00 00 00 01 00 00 00 ...` = `writeD(0)+writeD(1)+writeD(1)+…`, καθαρά Mobius.
 
-### `src/routes/api/l2-bridge.ts`
+## Αλλαγή (1 αρχείο)
 
-1. **Επέκταση `ALLOWED_HOSTS`** ώστε να δέχεται και IP literals των γνωστών game servers του slave.gr:
-   - `l2server.slave.gr` (login)
-   - `176.92.69.220` (GS που γύρισε το ServerList)
-2. **Καλύτερο logging σφαλμάτων**: αν το `connect()` αποτύχει async (μετά το επιστρεφόμενο 101), στείλε `{type:"error", error:"..."}` πάνω στο WS πριν κλείσει, ώστε ο client να μπορεί να εμφανίσει συγκεκριμένη αιτία αντί για σιωπηλό κλείσιμο.
-3. **Διεύρυνση `ALLOWED_PORTS`** να καλύπτει και 2000-2010 + 7000-7790 (κάποια chronicles τρέχουν GS σε άλλα ports), αλλά κρατάμε τη λίστα κλειστή.
+### `src/lib/l2-protocol/game-client.ts` — `handlePacket` (KeyPacket branch)
 
-### `src/routes/index.tsx` (μικρή προσθήκη — μόνο UI feedback)
+Παράλειψη του status byte πριν διαβάσουμε το 8-byte cipher seed:
 
-- Όταν το `L2GameClient.start()` επιστρέψει `{type:"error"}`, εμφάνισε το exact error string στο protocol log (ήδη γίνεται μέσω `onEvent`), αλλά πρόσθεσε και ένα toast/inline μήνυμα στο κουμπί "ENTER WORLD" ώστε ο χρήστης να βλέπει "GS connect failed: …" αντί για κενό spinner.
+```ts
+const op = r.u8();          // 0x2E
+const ok = r.u8();          // status (0x00 ή 0x01 ανάλογα chronicle)
+const seed = r.bytes(8);    // ← τώρα διαβάζει 51 7d 35 d8 bc e4 d1 69
+```
+
+Επίσης:
+- Αν `ok !== 0 && ok !== 1`, treat as parse failure με σαφές μήνυμα.
+- Log και του `ok` byte ώστε αν ξανασπάσει να βλέπουμε.
+
+## Εφεδρικά (αν συνεχίσει να κλείνει μετά το fix)
+
+Δεν τα κάνουμε τώρα — μόνο αν το παραπάνω δεν λύσει το πρόβλημα:
+1. Δοκιμή protocol revision Mobius-specific (π.χ. 152 / 419 / 110) αντί του login `0xc621`.
+2. Δοκιμή AuthLogin opcode 0x08 ή 0x0B αντί 0x2B.
+3. Έλεγχος σειράς session keys (`playKey1/playKey2` vs `loginKey1/loginKey2`).
+
+Για όλα αυτά θα χρειαστεί το log μετά το fix για να αποφασίσουμε σωστά.
 
 ## Out of scope
 
-- Δεν αλλάζουμε το game-server parsing (`game-client.ts`, `game-crypt.ts`). Αυτό θα το δοκιμάσουμε μόλις φτάσει πραγματικό KeyPacket — αν χρειαστούν διορθώσεις, νέα iteration με βάση τα bytes που θα logάρει.
-- Δεν ανοίγουμε το bridge σε αυθαίρετα hosts (security).
+- `CharSelectionInfo` parsing — θα το δούμε μόλις φτάσει το πρώτο πραγματικό packet.
+- Καμία αλλαγή σε bridge / login client / UI.
 
-## Επόμενο βήμα μετά το fix
+## Επόμενο βήμα
 
-Θα ξανατρέξεις το login και θα μου στείλεις το log από `[GS] connecting bridge…` και μετά. Αναμενόμενα events:
-1. `[GS] WebSocket open`
-2. `[GS] TCP connected 176.92.69.220:7777`
-3. `[GS] ← key …` (πρώτο plaintext KeyPacket)
+Ξανατρέξε ENTER WORLD και στείλε το log από `[GS] cipher seed=…` και μετά.
