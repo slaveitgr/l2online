@@ -153,12 +153,18 @@ function Launcher() {
 
   return (
     <div className="fixed inset-0 overflow-hidden l2-bg-login">
-      {/* Background artwork slot — drop a real image here later */}
-      <div
-        className="absolute inset-0 bg-center bg-cover opacity-90 pointer-events-none"
-        style={{ backgroundImage: "var(--l2-login-art, none)" }}
+      {/* Background video */}
+      <video
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload="auto"
+        className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+        src={loginVideo.url}
       />
-      <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/60 pointer-events-none" />
+      <div className="absolute inset-0 bg-black/50 pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/70 pointer-events-none" />
 
       {/* Center modal — Login or Server select */}
       <div className="absolute inset-0 flex items-center justify-center">
