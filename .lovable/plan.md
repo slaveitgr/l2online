@@ -1,33 +1,66 @@
-## Διάγνωση #2
+## Πρόβλημα
 
-Cipher seed επιβεβαιωμένα σωστό (`23 f6 da 19 d1 f0 a4 d5` με τα flag bytes να ταιριάζουν Mobius pattern), αλλά ο server κλείνει αμέσως μετά το AuthLogin.
-
-Στο `game-client.ts → sendFrame(body, true)` περνάμε το body από `appendChecksumAndPad()` πριν το encrypt. Αυτό ήταν αντιγραφή από το **login client** όπου Blowfish απαιτεί 8-byte block alignment + checksum. Όμως ο Mobius **GameServer δεν χρησιμοποιεί ούτε checksum ούτε padding** — μόνο straight XOR stream cipher στο raw body. Άρα ο GS διαβάζει το AuthLogin με 4 extra bytes (checksum) + padding, βρίσκει garbage keys / size mismatch και κλείνει.
-
-## Αλλαγή (1 αρχείο, 1 γραμμή)
-
-### `src/lib/l2-protocol/game-client.ts` — `sendFrame`
-
-```ts
-private sendFrame(plainBody: Uint8Array, encrypted: boolean) {
-  if (!this.ws) return;
-  const payload = encrypted
-    ? this.crypt!.encrypt(plainBody)           // ← χωρίς checksum/padding
-    : plainBody;
-  ...
-}
+Από το log:
+```
+[GS] ← key 26B 2e 00 4c 03 ed 93 60 81 92 5a 00 00 00 00 01 ...
+[GS] cipher seed=4c 03 ed 93 60 81 92 5a  ← λάθος, off-by-one
 ```
 
-Επίσης κρατάμε ως comment: «GS Mobius: raw XOR, no checksum, no padding». Αν αργότερα δοκιμάσουμε classic L2J fork που θέλει checksum, θα το γυρίσουμε πίσω με flag.
+Ο Mobius/L2J GameServer στέλνει KeyPacket ως:
+- C  opcode `0x2E`
+- C  flag byte (`0x00` ή `0x01`)
+- B  **8-byte seed** (το πραγματικό GameCrypt seed)
+- ... status flags
 
-## Επιπλέον log
+Το σωστό seed στο παράδειγμα είναι `4c 03 ed 93 60 81 92 5a` — όχι αυτό που παίρνουμε τώρα μετατοπισμένο κατά 1 byte. Με λάθος seed, το AuthLogin κρυπτογραφείται με γκάρμπατζ key και ο server κλείνει αμέσως (`tcp-eof`).
 
-Πριν στείλουμε το AuthLogin να εκτυπώνουμε και τα πρώτα bytes του ENCRYPTED payload (πρώτα 16 bytes hex). Αν ξανακλείσει, θα δούμε αν το cipher είναι αλφαβητικά σωστό (το πρώτο byte μετά XOR πρέπει να = `0x2B ^ key[0] ^ 0` = `0x2B ^ 0x23` = `0x08`).
+## Αλλαγή (1 αρχείο)
+
+### `src/lib/l2-protocol/game-client.ts` — KeyPacket parsing branch (≈ γραμμές 156-178)
+
+Αντικατάσταση:
+```ts
+const r = new PacketReader(body);
+const op = r.u8();
+if (op !== 0x2e && op !== 0x00) {
+  throw new Error(`expected KeyPacket opcode 0x2E or 0x00, got 0x${op.toString(16)}`);
+}
+const seed = r.bytes(8);
+```
+
+Με:
+```ts
+const op = body[0];
+if (op !== 0x2e && op !== 0x00) {
+  throw new Error(`expected KeyPacket opcode 0x2E or 0x00, got 0x${op.toString(16)}`);
+}
+// Mobius/L2J KeyPacket: after opcode 0x2E υπάρχει ένα flag byte (0x00/0x01),
+// ΜΕΤΑ το 8-byte seed. Classic opcode 0x00 βάζει το seed αμέσως μετά.
+let seedOffset = 1;
+if (op === 0x2e && body.length >= 10 && (body[1] === 0x00 || body[1] === 0x01)) {
+  seedOffset = 2;
+}
+if (body.length < seedOffset + 8) {
+  throw new Error(`KeyPacket too short: ${body.length}B`);
+}
+const seed = body.slice(seedOffset, seedOffset + 8);
+```
+
+Το υπόλοιπο (`new GameCrypt(seed)`, `gotKey = true`, `key-ok`, log, `sendAuthLogin()`) μένει ως έχει.
+
+## Verification
+
+Μετά το fix το log πρέπει να γίνει:
+```
+[GS] cipher seed=4c 03 ed 93 60 81 92 5a   (ή ό,τι αντίστοιχο για το νέο session)
+[GS] → AuthLogin user="mslave"
+[GS] → enc 35B ...
+[GS] ← op 0x09|0x13|0x67 ...   ← CharSelectionInfo, αντί για tcp-eof
+```
+
+Αν παρά το σωστό seed ο server συνεχίσει να κλείνει, το επόμενο ύποπτο είναι το layout του AuthLogin (σειρά `playKey/loginKey`, extra trailing bytes) — out of scope για αυτό το βήμα.
 
 ## Out of scope
 
-- Τίποτα άλλο.
-
-## Επόμενο βήμα
-
-Στείλε το log από `[GS] → AuthLogin` και κάτω.
+- Server #2 (`127.0.0.1:0`) — dummy entry, αγνοείται.
+- Πειραγμα στο AuthLogin payload — μόνο αν δεν φτιάξει με το seed fix.
