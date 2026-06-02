@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { GameCharacter } from "@/lib/l2-protocol/game-client";
 
 export const Route = createFileRoute("/characters")({
   head: () => ({
@@ -11,20 +12,7 @@ export const Route = createFileRoute("/characters")({
   component: Characters,
 });
 
-interface Char {
-  id: string;
-  name: string;
-  klass: string;
-  level: number;
-  race: string;
-  color: string;
-}
-
-const CHARS: Char[] = [
-  { id: "c1", name: "Vesperion", klass: "Phoenix Knight", level: 78, race: "Human", color: "oklch(0.55 0.15 30)" },
-  { id: "c2", name: "Lyrael", klass: "Eva's Saint", level: 76, race: "Elf", color: "oklch(0.6 0.12 160)" },
-  { id: "c3", name: "Drakhar", klass: "Soultaker", level: 81, race: "Dark Elf", color: "oklch(0.45 0.18 310)" },
-];
+type Char = GameCharacter;
 
 function Characters() {
   const navigate = useNavigate();
