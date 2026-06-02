@@ -1,85 +1,46 @@
-## Τι ανακάλυψα από το Mobius/Superion source
+# Fix: Init packet decrypts to garbage
 
-Όλη η διαφορά με τον τρέχοντα κώδικα είναι ότι στο L2J Mobius **όλα τα πακέτα είναι Blowfish-encrypted από το πρώτο byte** — ακόμα και το Init:
+## Root cause
 
-- **Init (server → client)**: Blowfish-ECB με **static key** `6b 60 cb 5b 82 ce 90 b1 cc 2b 6c 55 6c 6c 6c 6c` + επιπλέον **XOR pass** (`NewCrypt.encXORPass`) μέσα στο payload.
-- **Μετά το Init**: Blowfish-ECB με τον **session key** (16 bytes που έρχονται μέσα στο Init).
+After decrypting the 192-byte Init packet with the static Blowfish key and reversing `encXORPass`, the first byte should be the Init opcode `0x00`. Instead the bridge log shows `64 37 0f 19 …` — pure noise. This means the Blowfish step is producing the wrong plaintext.
 
-Γι' αυτό το πρώτο byte φαινόταν 0x21 (encrypted garbage) και η "revision" 0xA5C0BFFC αντί 0xC621.
+Comparing the server source the user uploaded (`L2J_Mobius_12.3_Superion_Source`) to our TypeScript implementation:
 
-## Opcode map (από `LoginClientPackets.java` + `LoginServerPackets.java`)
+- Server `BlowfishEngine.bytesTo32bits` reads each 8-byte block as **little-endian** (`byte[0] | byte[1]<<8 | byte[2]<<16 | byte[3]<<24`), and `bits32ToBytes` writes back the same way.
+- Our `src/lib/l2-protocol/blowfish.ts` reads/writes the block with `getUint32(..., false)` / `setUint32(..., false)` — **big-endian**, which is the textbook Blowfish convention but NOT what this fork of Mobius (the Async-mmocore variant used by Superion) uses.
 
-| Dir | Op | Packet |
-|---|---|---|
-| C→S | 0x07 | AuthGameGuard |
-| C→S | 0x00 | RequestAuthLogin |
-| C→S | 0x05 | RequestServerList |
-| C→S | 0x02 | RequestServerLogin |
-| C→S | 0x0E/0x0F | PI Agreement (Korean compliance — αν χρειαστεί) |
-| S→C | 0x00 | Init |
-| S→C | 0x0B | GGAuth |
-| S→C | 0x03 | LoginOk |
-| S→C | 0x04 | ServerList |
-| S→C | 0x01 | LoginFail |
-| S→C | 0x06 | PlayFail |
-| S→C | 0x0D | LoginOptFail |
-| S→C | 0x11/0x12 | PIAgreementCheck/Ack |
+The key schedule itself is unchanged on both sides (standard BE cyclic XOR of key bytes into `P[]`), so only the per-block byte packing in `encrypt`/`decrypt` is wrong. Everything else (`encXORPass` inverse, static key constant, RSA scramble, opcode map, framing) is already aligned with the server source.
 
-## Init structure (από `Init.java`)
+## Change
 
-```
-u8  opcode = 0x00
-u32 sessionId
-u32 protocolRevision = 0x0000C621
-b   scrambledRsaModulus (128 bytes)
-u32 ggKey[4]   (16 bytes total)        ← εδώ είχα skip 16 αντί για **32**
-u8  blowfishKey[16]                    ← σωστή θέση
-u8  null terminator
+**File:** `src/lib/l2-protocol/blowfish.ts`
+
+In both `encrypt(data)` and `decrypt(data)`, switch the 8-byte block I/O to little-endian:
+
+```ts
+const l = view.getUint32(i, true);      // was: false
+const r = view.getUint32(i + 4, true);  // was: false
+// ...
+view.setUint32(i, el, true);            // was: false
+view.setUint32(i + 4, er, true);        // was: false
 ```
 
-## Credential block (από `RequestAuthLogin.java`)
+(Apply the same little-endian flag to the matching reads/writes in `encrypt`. Leave the key-schedule loop in the constructor untouched.)
 
-Legacy 128-byte block (server δέχεται και νέο 256-byte, αλλά ξεκινάμε με legacy):
-- username @ offset **0x5E**, length 14
-- password @ offset **0x6C**, length 16
-
-## RSA scramble (από `ScrambledKeyPair.java`)
-
-Ο τρέχων `unscrambleModulus` έχει λάθος βήματα. Το σωστό inverse:
-1. `m[0x40+i] ^= m[i]` for i in 0..0x40
-2. `m[0x0d+i] ^= m[0x34+i]` for i in 0..4
-3. `m[i] ^= m[0x40+i]` for i in 0..0x40
-4. swap `m[0x00..0x04]` ↔ `m[0x4d..0x51]`
-
-## Encryption flow (από `LoginEncryption.java` + `NewCrypt.java`)
-
-- **Server → Client (Init)**: `appendChecksum + encXORPass + Blowfish(static)` → client undoes με `Blowfish.decrypt + verifyChecksum + decXORPass`
-- **Όλα τα επόμενα**: `appendChecksum + Blowfish(sessionKey)` (καμία XOR pass) → ακριβώς ό,τι κάνει ήδη ο `sendFrame()`
-
-## Αλλαγές στον κώδικα
-
-| File | Αλλαγή |
-|---|---|
-| `src/lib/l2-protocol/packets.ts` | + `encXORPass(buf, offset, size, key)` (self-inverse· ίδιο για enc/dec· ταυτόσημο με NewCrypt.java) |
-| `src/lib/l2-protocol/rsa.ts` | Rewrite `unscrambleModulus` σωστά. `packAuthLoginBlock(user,pass)` τοποθετεί user@0x5E len 14 ASCII και pass@0x6C len 16 ASCII μέσα σε 128 zeros |
-| `src/lib/l2-protocol/login-client.ts` | (α) Init decrypt με static Blowfish, verify checksum, undo XOR pass. (β) Init parse: skip 32 (όχι 16). (γ) Hex dump του Init στο protocol log για debugging. (δ) Mobius opcodes ως πάνω πίνακας. (ε) Χειρισμός 0x11 (PIAgreementCheck) — αν φτάσει, στέλνουμε 0x0F (RequestPIAgreement) με agreement=1, μετά συνεχίζουμε. (στ) Καθαρότερο error message όταν `verifyChecksum` αποτύχει |
-
-UI/index.tsx δεν αλλάζει — μόνο το log γεμίζει με τις νέες status lines.
+No other files need changes for this fix. The existing static-key, `decXORPass`, RSA unscramble, and opcode handling in `login-client.ts` will now see real plaintext: the next log line should report `revision=<server protocol>`, a sane 32-bit session id, and progress to `AuthGameGuard → GGAuth → RequestAuthLogin`.
 
 ## Verification
 
-Μετά το deploy το protocol log πρέπει να δείχνει:
+After the change, reconnect from the SIGN IN form. Expected protocol log:
 
 ```
-TCP connected l2server.slave.gr:2106
-← init enc 192B
-← init dec 186B opcode=0x00 rev=0xc621 session=0x....
+← init enc 192B …
+← init dec 192B 00 <sessionId×4> <revision×4> …
+Init OK. revision=… session=0x…
 Sending AuthGameGuard
-← opcode 0x0b (GGAuth)
+← opcode 0x0b (…) → gg-ok
 Sending RequestAuthLogin
-← opcode 0x03 (LoginOk)  ή  0x01 (LoginFail, reason=...)
-Sending RequestServerList
-← opcode 0x04 (ServerList) — N servers
+← opcode 0x03 (LoginOk) or 0x01 (LoginFail)
 ```
 
-Αν εμφανιστεί 0x11 (PIAgreementCheck), o handler θα στείλει αυτόματα 0x0F και θα συνεχίσει.
+If Init still does not start with `0x00`, the static key on this specific server build differs and we will need to capture the wire bytes for further inspection — but the source confirms the standard Mobius key, so LE block I/O is the expected fix.
