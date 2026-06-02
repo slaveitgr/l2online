@@ -218,7 +218,7 @@ function Launcher() {
                   </option>
                 ))}
               </select>
-              <span className="text-[10px] text-gold tracking-widest px-2">LINEAGE II</span>
+              <span className="text-[10px] text-gold tracking-widest px-2">L2SLAVE</span>
               <span className="text-[10px] text-muted-foreground tracking-widest">Light</span>
             </div>
             <div className="flex justify-center gap-2 pt-1">
@@ -256,14 +256,15 @@ function Launcher() {
 
       {/* Footer bar */}
       <div className="l2-footer">
-        <span className="font-display tracking-[0.3em] text-foreground/80">NC</span>
+        <span className="font-display tracking-[0.3em] text-gold/80">L2</span>
         <span className="sep">|</span>
-        <span className="font-display tracking-[0.4em] text-foreground/80">LINEAGE II</span>
+        <span className="font-display tracking-[0.4em] text-foreground/80">L2SLAVE</span>
         <span className="sep">|</span>
-        <span>4game.com</span>
+        <a href="https://l2.slave.gr" target="_blank" rel="noreferrer" className="hover:text-gold transition pointer-events-auto">l2.slave.gr</a>
         <span className="sep">·</span>
-        <span>© NCSOFT Corporation · Fan project · Not affiliated with NCSOFT</span>
+        <span>Unofficial web client</span>
       </div>
+
     </div>
   );
 }
