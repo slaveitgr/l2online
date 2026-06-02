@@ -83,6 +83,7 @@ function Launcher() {
         username,
         password,
         onEvent: (ev: LoginEvent) => {
+          console.log("[LS]", ev);
           if (ev.type === "status") pushStatus(ev.message);
           else if (ev.type === "init") pushStatus(`Init: protocol=${ev.protocolRevision}`);
           else if (ev.type === "gg-ok") pushStatus("GameGuard OK");
