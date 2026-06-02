@@ -82,6 +82,7 @@ function CdnCachePage() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<PrefetchProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
   const [rangeTests, setRangeTests] = useState<RangeTestResult[]>([]);
   const [rangeTesting, setRangeTesting] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
