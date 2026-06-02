@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { L2LoginClient, type GameServer, type LoginEvent } from "@/lib/l2-protocol/login-client";
-import { L2GameClient, type GameCharacter, type GameEvent } from "@/lib/l2-protocol/game-client";
+import { L2GameClient, setGameConnection, type GameEvent } from "@/lib/l2-protocol/game-client";
 import { getMountStatus, pickFolder, unmount, type MountStatus } from "@/lib/local-mount";
 import { getCacheStats, formatBytes, type CacheStats } from "@/lib/l2-assets";
 import { loadL2Ini, summarize, type L2Summary } from "@/lib/l2-config";
@@ -140,6 +140,7 @@ function Launcher() {
         loginKey2: k2,
         playKey1: p1,
         playKey2: p2,
+        keepAlive: true,
         onEvent: (ev: GameEvent) => {
           console.log("[GS]", ev);
           if (ev.type === "status") pushStatus(ev.message);
@@ -147,12 +148,15 @@ function Launcher() {
       });
       const gr = await gs.start();
       if (gr.type === "characters") {
+        setGameConnection(gs);
         sessionStorage.setItem("l2_characters", JSON.stringify(gr.chars));
         sessionStorage.setItem("l2_session", JSON.stringify({ username, server }));
         navigate({ to: "/characters" });
       } else if (gr.type === "error") {
+        setGameConnection(null);
         setError(gr.error);
       } else {
+        setGameConnection(null);
         setError("Game server closed connection before character list arrived.");
       }
     } finally {

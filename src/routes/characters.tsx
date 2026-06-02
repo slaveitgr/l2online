@@ -1,6 +1,11 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import type { GameCharacter } from "@/lib/l2-protocol/game-client";
+import { useEffect, useRef, useState } from "react";
+import {
+  getGameConnection,
+  setGameConnection,
+  type GameCharacter,
+  type GameEvent,
+} from "@/lib/l2-protocol/game-client";
 
 export const Route = createFileRoute("/characters")({
   head: () => ({
@@ -19,6 +24,9 @@ function Characters() {
   const [chars, setChars] = useState<Char[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
+  const [entering, setEntering] = useState(false);
+  const [enterError, setEnterError] = useState<string | null>(null);
+  const inWorldRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -33,8 +41,56 @@ function Characters() {
     } catch { /* ignore */ }
   }, []);
 
+  function appendLog(line: string) {
+    setLog((l) => {
+      const next = [...l.slice(-299), line];
+      try { sessionStorage.setItem("l2_gslog", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }
+
+  function enterWorld() {
+    const conn = getGameConnection();
+    if (!conn || !conn.connected) {
+      setGameConnection(null);
+      try { sessionStorage.removeItem("l2_characters"); } catch { /* ignore */ }
+      setEnterError("Game session lost — please sign in again.");
+      setTimeout(() => navigate({ to: "/" }), 800);
+      return;
+    }
+    const idx = chars.findIndex((c) => c.id === selected);
+    const slot = idx < 0 ? 0 : idx;
+    inWorldRef.current = false;
+    setEnterError(null);
+    setEntering(true);
+
+    conn.setEventHandler((ev: GameEvent) => {
+      console.log("[GS]", ev);
+      if (ev.type === "status") {
+        appendLog(ev.message);
+      } else if (ev.type === "char-selected") {
+        appendLog(`[GS] char-selected ${ev.name} (#${ev.objectId})`);
+      } else if (ev.type === "in-world") {
+        inWorldRef.current = true;
+        appendLog(ev.message);
+        navigate({ to: "/world" });
+      } else if (ev.type === "error") {
+        setEnterError(ev.error);
+        setEntering(false);
+      } else if (ev.type === "closed") {
+        if (!inWorldRef.current) {
+          setEnterError("Game server closed the connection during enter-world.");
+          setEntering(false);
+          setGameConnection(null);
+        }
+      }
+    });
+
+    conn.selectCharacter(slot);
+  }
+
   const logPanel = log.length > 0 ? (
-    <details className="text-[10px] font-mono text-muted-foreground panel rounded p-3 max-w-3xl mx-auto w-full">
+    <details className="text-[10px] font-mono text-muted-foreground panel rounded p-3 max-w-3xl mx-auto w-full" open={entering}>
       <summary className="cursor-pointer hover:text-gold">Protocol log ({log.length})</summary>
       <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words leading-relaxed">
         {log.join("\n")}
@@ -120,11 +176,17 @@ function Characters() {
                   <p className="text-muted-foreground mt-1">Level {c.level}</p>
                   <div className="gold-divider mt-8 max-w-xs mx-auto" />
                   <button
-                    onClick={() => navigate({ to: "/world" })}
-                    className="mt-8 bg-gradient-to-b from-primary to-gold-muted text-primary-foreground font-display tracking-[0.3em] px-12 py-4 rounded border border-gold/40 hover:brightness-110 transition-all shadow-xl"
+                    onClick={enterWorld}
+                    disabled={entering}
+                    className="mt-8 bg-gradient-to-b from-primary to-gold-muted text-primary-foreground font-display tracking-[0.3em] px-12 py-4 rounded border border-gold/40 hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-xl"
                   >
-                    ENTER WORLD
+                    {entering ? "ENTERING…" : "ENTER WORLD"}
                   </button>
+                  {enterError && (
+                    <div className="mt-4 text-xs text-blood bg-blood/10 border border-blood/40 rounded p-2 font-mono max-w-md mx-auto">
+                      {enterError}
+                    </div>
+                  )}
                 </>
               );
             })()}
