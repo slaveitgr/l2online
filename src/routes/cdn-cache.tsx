@@ -221,6 +221,12 @@ function CdnCachePage() {
               ENTER WORLD →
             </button>
             <button
+              onClick={onRangeTest}
+              disabled={rangeTesting}
+              className="border border-gold/40 text-gold hover:bg-gold/10 font-display tracking-[0.2em] px-5 py-2.5 rounded transition-colors disabled:opacity-30"
+            >
+              {rangeTesting ? "TESTING…" : "TEST CORS / RANGE"}
+            <button
               onClick={onClear}
               disabled={busy}
               className="text-xs text-muted-foreground hover:text-blood transition-colors font-mono uppercase tracking-widest disabled:opacity-30 ml-auto"
