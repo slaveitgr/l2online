@@ -59,7 +59,11 @@ function Launcher() {
   }
 
   function pushStatus(msg: string) {
-    setStatusLog((l) => [...l.slice(-19), msg]);
+    setStatusLog((l) => {
+      const next = [...l.slice(-199), msg];
+      try { sessionStorage.setItem("l2_gslog", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
   }
 
   const loginRef = useRef<L2LoginClient | null>(null);
@@ -79,6 +83,7 @@ function Launcher() {
         username,
         password,
         onEvent: (ev: LoginEvent) => {
+          console.log("[LS]", ev);
           if (ev.type === "status") pushStatus(ev.message);
           else if (ev.type === "init") pushStatus(`Init: protocol=${ev.protocolRevision}`);
           else if (ev.type === "gg-ok") pushStatus("GameGuard OK");
@@ -136,6 +141,7 @@ function Launcher() {
         playKey1: p1,
         playKey2: p2,
         onEvent: (ev: GameEvent) => {
+          console.log("[GS]", ev);
           if (ev.type === "status") pushStatus(ev.message);
         },
       });

@@ -18,6 +18,7 @@ function Characters() {
   const navigate = useNavigate();
   const [chars, setChars] = useState<Char[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [log, setLog] = useState<string[]>([]);
 
   useEffect(() => {
     try {
@@ -26,7 +27,20 @@ function Characters() {
       setChars(parsed);
       setSelected(parsed[0]?.id ?? null);
     } catch { /* ignore */ }
+    try {
+      const rawLog = sessionStorage.getItem("l2_gslog");
+      setLog(rawLog ? JSON.parse(rawLog) : []);
+    } catch { /* ignore */ }
   }, []);
+
+  const logPanel = log.length > 0 ? (
+    <details className="text-[10px] font-mono text-muted-foreground panel rounded p-3 max-w-3xl mx-auto w-full">
+      <summary className="cursor-pointer hover:text-gold">Protocol log ({log.length})</summary>
+      <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words leading-relaxed">
+        {log.join("\n")}
+      </pre>
+    </details>
+  ) : null;
 
   if (chars.length === 0) {
     return (
@@ -36,6 +50,7 @@ function Characters() {
           Sign in and select a game server from the launcher to load your roster.
         </p>
         <Link to="/" className="text-xs px-4 py-2 border border-gold/40 rounded text-gold hover:bg-gold/10 transition">← Back to launcher</Link>
+        {logPanel}
       </div>
     );
   }
@@ -116,6 +131,7 @@ function Characters() {
           </div>
         </section>
       </main>
+      {logPanel && <div className="border-t border-border/60 p-4">{logPanel}</div>}
     </div>
   );
 }
