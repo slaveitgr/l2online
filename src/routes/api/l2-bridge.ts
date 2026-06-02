@@ -44,7 +44,6 @@ export const Route = createFileRoute("/api/l2-bridge")({
         try {
           // Build specifier at runtime so Rollup cannot statically analyze it.
           const spec = "cloudflare:" + "sockets";
-          // @ts-expect-error cloudflare:sockets is provided by the Workers runtime
           const mod = await import(/* @vite-ignore */ spec);
           connect = mod.connect as typeof connect;
         } catch (err) {
