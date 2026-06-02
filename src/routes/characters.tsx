@@ -166,16 +166,17 @@ function Characters() {
             <div className="text-[10px] text-muted-foreground">Lv.{sel.level} {sel.klass}</div>
           </div>
           <div className="l2-frame rounded px-3 py-2 space-y-1 text-[9px] font-mono">
-            <StatRow label="HP" value={`${sel.hp}/${sel.maxHp}`} pct={sel.hp / sel.maxHp} color="oklch(0.55 0.22 25)" />
-            <StatRow label="MP" value={`${sel.mp}/${sel.maxMp}`} pct={sel.mp / sel.maxMp} color="oklch(0.55 0.18 250)" />
+            <StatRow label="HP" value="—" pct={1} color="oklch(0.55 0.22 25)" />
+            <StatRow label="MP" value="—" pct={1} color="oklch(0.55 0.18 250)" />
             <StatRow label="VP" value="" pct={0} color="oklch(0.6 0.18 30)" />
-            <StatRow label="XP" value={`${sel.exp}`} pct={0.83} color="oklch(0.55 0.04 70)" />
+            <StatRow label="XP" value={`Lv.${sel.level}`} pct={0.83} color="oklch(0.55 0.04 70)" />
             <div className="flex items-center justify-between pt-0.5">
               <span className="text-muted-foreground w-7">SP</span>
-              <span className="flex-1 text-foreground/80 px-2">{sel.sp.toLocaleString()}</span>
+              <span className="flex-1 text-foreground/80 px-2">{sel.race}</span>
               <span className="text-muted-foreground">Rep. <span className="text-foreground/80">0</span></span>
             </div>
           </div>
+
           <div className="flex justify-center mt-3">
             <button onClick={play} disabled={entering} className="l2-button" style={{ minWidth: "8rem" }}>
               {entering ? "…" : "Play"}
