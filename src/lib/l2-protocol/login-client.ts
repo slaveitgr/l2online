@@ -111,10 +111,16 @@ export class L2LoginClient {
   private resolve!: (ev: LoginEvent) => void;
   private settled = false;
   private opts: LoginOptions;
+  private loginKey1: [number, number] = [0, 0];
+  // Continuation promise installed by selectServer() to receive PlayOk.
+  private playResolve: ((ev: LoginEvent) => void) | null = null;
 
   constructor(opts: LoginOptions) {
     this.opts = opts;
   }
+
+  get protocol(): number { return this.protocolRevision; }
+  get loginSessionKey(): [number, number] { return this.loginKey1; }
 
   /** Returns the terminal event (login-ok+server-list, login-fail, error, or closed). */
   start(): Promise<LoginEvent> {
