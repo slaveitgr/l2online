@@ -60,6 +60,8 @@ function Launcher() {
     setStatusLog((l) => [...l.slice(-19), msg]);
   }
 
+  const loginRef = useRef<L2LoginClient | null>(null);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -84,11 +86,11 @@ function Launcher() {
           }
         },
       });
+      loginRef.current = client;
       const result = await client.start();
       if (result.type === "server-list") {
         setServers(result.servers);
         setSelectedServer(result.servers[0]?.id ?? null);
-        sessionStorage.setItem("l2_session", JSON.stringify({ username, servers: result.servers }));
       } else if (result.type === "login-fail") {
         setError(`Login failed: ${result.reason}`);
       } else if (result.type === "error") {
@@ -101,9 +103,53 @@ function Launcher() {
     }
   }
 
-  function onEnterWorld() {
+  async function onEnterWorld() {
     if (selectedServer == null) return;
-    navigate({ to: "/characters" });
+    const login = loginRef.current;
+    const server = servers.find((s) => s.id === selectedServer);
+    if (!login || !server) { setError("Login session lost — please re-authenticate."); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      pushStatus(`Requesting PlayOk for server #${server.id}…`);
+      const playEv = await login.selectServer(server.id);
+      if (playEv.type !== "play-ok") {
+        setError(playEv.type === "login-fail" ? `PlayOk failed: ${playEv.reason}` : "PlayOk failed");
+        return;
+      }
+      const [p1, p2] = playEv.playKey;
+      const [k1, k2] = login.loginSessionKey;
+      const protocolRevision = login.protocol;
+      // Login server connection is no longer needed.
+      login.close();
+
+      pushStatus(`Connecting to game server ${server.ip}:${server.port}…`);
+      const gs = new L2GameClient({
+        host: server.ip,
+        port: server.port,
+        username,
+        protocolRevision,
+        loginKey1: k1,
+        loginKey2: k2,
+        playKey1: p1,
+        playKey2: p2,
+        onEvent: (ev: GameEvent) => {
+          if (ev.type === "status") pushStatus(ev.message);
+        },
+      });
+      const gr = await gs.start();
+      if (gr.type === "characters") {
+        sessionStorage.setItem("l2_characters", JSON.stringify(gr.chars));
+        sessionStorage.setItem("l2_session", JSON.stringify({ username, server }));
+        navigate({ to: "/characters" });
+      } else if (gr.type === "error") {
+        setError(gr.error);
+      } else {
+        setError("Game server closed connection before character list arrived.");
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
