@@ -1,29 +1,34 @@
 /**
- * L2 Game Server client. Speaks the post-login protocol that lists characters
- * for the selected account. The handshake here is COMPLETELY different from
- * the login server — no Blowfish, no RSA. The server seeds a 16-byte stream
- * cipher via the `KeyPacket` and from then on every body is XOR-streamed.
+ * L2 Game Server client — Mobius 12.3 "Superion", protocol 502.
+ *
+ * Post-login protocol that lists characters for the selected account.
+ * COMPLETELY different from the login server — no Blowfish, no RSA. The server
+ * seeds a 16-byte stream cipher via KeyPacket… *but only if it asks for it*.
+ *
+ * IMPORTANT (the fix): KeyPacket carries a `PACKET_ENCRYPTION` int right after
+ * the 8-byte seed. If it is 0, the server neither encrypts nor decrypts — the
+ * whole game stream is PLAINTEXT and we must send AuthLogin unencrypted too.
+ * (slave.gr runs with PacketEncryption=false → that int is 0.)
  *
  * Flow:
  *   1. Open WS to /api/l2-bridge?host=<gameIp>&port=<gamePort>
- *   2. TX  ProtocolVersion (0x0E, plaintext) with the protocol revision
- *   3. RX  KeyPacket (plaintext) — 8-byte cipher seed
- *   4. Enable GameCrypt
- *   5. TX  AuthLogin (0x2B) with username + 4×u32 session keys
- *   6. RX  CharSelectionInfo (variable opcode by chronicle) — parse a flexible
- *           subset (name, classId, raceId, level)
+ *   2. TX  ProtocolVersion (0x0E, plaintext) with revision 502
+ *   3. RX  KeyPacket (0x2E, plaintext): result + 8-byte seed + PACKET_ENCRYPTION
+ *   4. Enable GameCrypt ONLY if PACKET_ENCRYPTION != 0
+ *   5. TX  AuthLogin (0x2B): username + 4×u32 session keys  (enc iff encryption on)
+ *   6. RX  CharSelectionInfo (0x09) — parse roster
  */
 import { GameCrypt } from "./game-crypt";
 import { classNameOf, raceNameOf } from "./classes";
 import { PacketReader, PacketWriter } from "./packets";
 
 export interface GameCharacter {
-  id: string;          // objectId as hex
+  id: string; // objectId as hex
   name: string;
   klass: string;
   race: string;
   level: number;
-  color: string;       // derived for UI
+  color: string; // derived for UI
 }
 
 export type GameEvent =
@@ -61,14 +66,21 @@ function colorFromName(name: string): string {
   return `oklch(0.55 0.15 ${hue})`;
 }
 
+// Mobius 12.3 CharSelectionInfo per-char paperdoll array lengths.
+// If you change Mobius build, re-count PAPERDOLL_ORDER / _VISUAL_ID.
+const PAPERDOLL_ORDER_LEN = 60;
+const PAPERDOLL_VISUAL_LEN = 9;
+
 export class L2GameClient {
   private ws: WebSocket | null = null;
   private crypt: GameCrypt | null = null;
+  private useEncryption = false; // set from KeyPacket's PACKET_ENCRYPTION flag
   private rxBuffer = new Uint8Array(0);
   private gotKey = false;
   private settled = false;
   private resolve!: (ev: GameEvent) => void;
   private opts: GameLoginOptions;
+  private authTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(opts: GameLoginOptions) {
     this.opts = opts;
@@ -93,15 +105,25 @@ export class L2GameClient {
     });
   }
 
-  private emit(ev: GameEvent) { this.opts.onEvent?.(ev); }
+  private emit(ev: GameEvent) {
+    this.opts.onEvent?.(ev);
+  }
 
   private settle(ev: GameEvent, statusOnSettle?: string) {
     if (this.settled) return;
     this.settled = true;
+    if (this.authTimer) {
+      clearTimeout(this.authTimer);
+      this.authTimer = null;
+    }
     if (statusOnSettle) this.emit({ type: "status", message: statusOnSettle });
     this.emit(ev);
     this.resolve(ev);
-    try { this.ws?.close(); } catch {/* ignore */}
+    try {
+      this.ws?.close();
+    } catch {
+      /* ignore */
+    }
   }
 
   private onMessage(data: unknown) {
@@ -114,7 +136,9 @@ export class L2GameClient {
         } else if (msg?.type === "error") {
           this.settle({ type: "error", error: `[GS] bridge: ${msg.error}` });
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       return;
     }
     if (!(data instanceof ArrayBuffer)) return;
@@ -141,78 +165,102 @@ export class L2GameClient {
   }
 
   private handlePacket(rawBody: Uint8Array) {
-    // First packet (KeyPacket) is plaintext. After that everything goes through GameCrypt.
-    let body: Uint8Array;
+    // First packet (KeyPacket) is always plaintext. Afterwards it depends on
+    // the PACKET_ENCRYPTION flag we read out of the KeyPacket.
     if (!this.gotKey) {
-      body = rawBody;
-      this.emit({ type: "status", message: `[GS] ← key ${body.length}B ${hex(body)}` });
-    } else {
-      body = this.crypt!.decrypt(rawBody);
-      this.emit({ type: "status", message: `[GS] ← op 0x${body[0].toString(16).padStart(2, "0")} (${body.length}B) ${hex(body)}` });
-    }
-
-    const opcode = body[0];
-
-    // KeyPacket (Mobius/Interlude GS): opcode 0x2E followed by 8-byte cipher
-    // seed (NO separate "ok" flag — the bytes right after the opcode ARE the
-    // key). Classic C4/C6 uses opcode 0x00 with the same layout.
-    if (!this.gotKey) {
-      try {
-        const op = body[0];
-        if (op !== 0x2e && op !== 0x00) {
-          throw new Error(`expected KeyPacket opcode 0x2E or 0x00, got 0x${op.toString(16)}`);
-        }
-        // Mobius/L2J KeyPacket: after opcode 0x2E there's a flag byte
-        // (0x00/0x01) BEFORE the 8-byte seed. Classic opcode 0x00 places the
-        // seed immediately after the opcode.
-        let seedOffset = 1;
-        let result = 0x01;
-        if (op === 0x2e && body.length >= 10 && (body[1] === 0x00 || body[1] === 0x01)) {
-          seedOffset = 2;
-          result = body[1];
-        }
-        if (op === 0x2e && result !== 0x01) {
-          throw new Error(`Server rejected protocol ${this.opts.protocolRevision} (KeyPacket result=${result}). Expected 502.`);
-        }
-        if (body.length < seedOffset + 8) {
-          throw new Error(`KeyPacket too short: ${body.length}B`);
-        }
-        const seed = body.slice(seedOffset, seedOffset + 8);
-        this.crypt = new GameCrypt(seed);
-        this.gotKey = true;
-        this.emit({ type: "key-ok" });
-        this.emit({ type: "status", message: `[GS] cipher seed=${hex(seed, 8)}` });
-        this.sendAuthLogin();
-      } catch (err) {
-        this.settle({ type: "error", error: `[GS] KeyPacket parse failed: ${(err as Error).message}` });
-      }
+      this.handleKeyPacket(rawBody);
       return;
     }
 
+    const body = this.useEncryption && this.crypt ? this.crypt.decrypt(rawBody) : rawBody;
+    const opcode = body[0];
+    this.emit({
+      type: "status",
+      message: `[GS] ← op 0x${opcode.toString(16).padStart(2, "0")} (${body.length}B) ${hex(body)}`,
+    });
 
-    // After cipher: only care about CharSelectionInfo for now. The opcode
-    // varies by chronicle (0x09 classic/HF, 0x13 retail GoD, 0x67 Mobius
-    // Superion ex-packet). We try the most common ones.
-    switch (opcode) {
-      case 0x09: {
-        this.parseCharSelectionInfo(body);
-        return;
+    // CharSelectionInfo on Mobius Superion is opcode 0x09 (confirmed in
+    // ServerPackets.java: CHARACTER_SELECTION_INFO(0x09)).
+    if (opcode === 0x09) {
+      if (this.authTimer) {
+        clearTimeout(this.authTimer);
+        this.authTimer = null;
       }
-      default: {
-        return;
+      this.parseCharSelectionInfo(body);
+      return;
+    }
+    // Anything else (system messages, pings) — ignore for now.
+  }
+
+  private handleKeyPacket(body: Uint8Array) {
+    try {
+      const op = body[0];
+      if (op !== 0x2e && op !== 0x00) {
+        throw new Error(`expected KeyPacket opcode 0x2E or 0x00, got 0x${op.toString(16)}`);
       }
+
+      // Mobius/L2J: op 0x2E, then a result byte (0=wrong protocol, 1=ok),
+      // then the 8-byte seed, then PACKET_ENCRYPTION (int).
+      // Classic op 0x00 puts the seed immediately after the opcode (no result).
+      let seedOffset = 1;
+      let result = 1;
+      if (op === 0x2e) {
+        result = body[1];
+        seedOffset = 2;
+      }
+
+      if (result !== 1) {
+        throw new Error(`server rejected protocol ${this.opts.protocolRevision} (result=${result}); expected 502`);
+      }
+      if (body.length < seedOffset + 8) {
+        throw new Error(`KeyPacket too short: ${body.length}B`);
+      }
+
+      const seed = body.slice(seedOffset, seedOffset + 8);
+
+      // PACKET_ENCRYPTION: the int right after the 8-byte seed.
+      // 0 → server runs plaintext; do NOT encrypt/decrypt anything.
+      const encOff = seedOffset + 8;
+      let useEncryption = false;
+      if (body.length >= encOff + 4) {
+        const flag =
+          (body[encOff] | (body[encOff + 1] << 8) | (body[encOff + 2] << 16) | (body[encOff + 3] << 24)) >>> 0;
+        useEncryption = flag !== 0;
+      }
+
+      this.useEncryption = useEncryption;
+      this.crypt = useEncryption ? new GameCrypt(seed) : null;
+      this.gotKey = true;
+
+      this.emit({ type: "key-ok" });
+      this.emit({
+        type: "status",
+        message: `[GS] encryption=${useEncryption ? "ON" : "OFF"} seed=${hex(seed, 8)}`,
+      });
+
+      this.sendAuthLogin();
+
+      // If the server accepts the auth but never sends CharSelectionInfo, it is
+      // almost always a GS↔LS session validation / account-in-use issue.
+      this.authTimer = setTimeout(() => {
+        this.settle({
+          type: "error",
+          error:
+            "[GS] AuthLogin accepted but no CharSelectionInfo within 8s — likely " +
+            "GS↔LS session validation or account already in use. Restart servers / wait, try once.",
+        });
+      }, 8000);
+    } catch (err) {
+      this.settle({ type: "error", error: `[GS] KeyPacket: ${(err as Error).message}` });
     }
   }
 
   // ===== TX =====
 
-  private sendFrame(plainBody: Uint8Array, encrypted: boolean) {
+  private sendFrame(plainBody: Uint8Array, encrypt: boolean) {
     if (!this.ws) return;
-    // Mobius GameServer: raw XOR stream cipher, no checksum, no padding.
-    // (Login server uses Blowfish which DOES require checksum+pad — that lives
-    // in login-client.ts.)
-    const payload = encrypted ? this.crypt!.encrypt(plainBody) : plainBody;
-    if (encrypted) {
+    const payload = encrypt && this.crypt ? this.crypt.encrypt(plainBody) : plainBody;
+    if (encrypt && this.crypt) {
       this.emit({ type: "status", message: `[GS] → enc ${payload.length}B ${hex(payload, 16)}` });
     }
     const total = payload.length + 2;
@@ -224,17 +272,18 @@ export class L2GameClient {
   }
 
   private sendProtocolVersion() {
-    // SendProtocolVersion (opcode 0x0E) — PLAINTEXT, no checksum, no padding.
+    // ProtocolVersion (0x0E) — ALWAYS plaintext, before any crypt exists.
     const body = new PacketWriter().u8(0x0e).u32(this.opts.protocolRevision).build();
-    this.emit({ type: "status", message: `[GS] → ProtocolVersion 0x${this.opts.protocolRevision.toString(16)}` });
+    this.emit({
+      type: "status",
+      message: `[GS] → ProtocolVersion 0x${this.opts.protocolRevision.toString(16)}`,
+    });
     this.sendFrame(body, false);
   }
 
   private sendAuthLogin() {
-    // AuthLogin (opcode 0x2B in Mobius classic):
-    //   S name, D playKey2, D playKey1, D loginKey1, D loginKey2,
-    //   D 0 (clientLang), C 0 (macAddr/HWID placeholder × ?)
-    // Some chronicles read additional bytes — we pad with zeros to be safe.
+    // AuthLogin (0x2B). Mobius reads: String name, playKey2, playKey1,
+    // loginKey1, loginKey2. Encrypt ONLY if the server enabled encryption.
     const body = new PacketWriter()
       .u8(0x2b)
       .str(this.opts.username)
@@ -242,91 +291,106 @@ export class L2GameClient {
       .u32(this.opts.playKey1)
       .u32(this.opts.loginKey1)
       .u32(this.opts.loginKey2)
-      .u32(0)
       .build();
-    this.emit({ type: "status", message: `[GS] → AuthLogin user="${this.opts.username}"` });
-    this.sendFrame(body, true);
+    this.emit({
+      type: "status",
+      message: `[GS] → AuthLogin user="${this.opts.username}" (${this.useEncryption ? "enc" : "plain"})`,
+    });
+    this.sendFrame(body, this.useEncryption);
   }
 
   // ===== Parsing =====
 
   /**
-   * CharSelectionInfo decoder for Mobius protocol 502 (12.3 Superion).
-   * Layout from gameserver/network/serverpackets/CharSelectionInfo.java.
+   * CharSelectionInfo (0x09), Mobius 12.3 Superion / protocol 502.
+   * Header: count(u32) + maxChars(u32) + byte + byte + int + byte + byte,
+   * then `count` full per-character blocks. We consume the entire per-char
+   * block so multiple characters stay aligned, but only surface what the UI
+   * needs (name, objectId, sex, race, baseClass, level).
    */
   private parseCharSelectionInfo(body: Uint8Array) {
     try {
       const r = new PacketReader(body);
-      r.u8();                 // opcode 0x09
-      const count = r.u32();  // count is int, not byte
+      r.u8(); // opcode 0x09
+      const count = r.u32(); // FIX: count is u32, not u8
       if (count > 32) {
         this.settle({ type: "error", error: `[GS] implausible char count: ${count}` });
         return;
       }
-      // Header before per-char array:
-      // int MAX_CHARACTERS, byte isMax, byte canPlay, int 2 (KR flag), byte 0, byte 0
-      r.skip(12);
+      // Header before the char array: 12 bytes.
+      r.skip(4); // maxCharactersPerAccount
+      r.skip(1); // (size == max) flag
+      r.skip(1); // can-play flag
+      r.skip(4); // korean-client int (=2)
+      r.skip(1); // inactive-gift flag
+      r.skip(1); // balthus-knights flag
 
       const chars: GameCharacter[] = [];
       for (let i = 0; i < count; i++) {
-        const name      = r.str();
-        const objectId  = r.u32();
-        r.str();              // accountName
-        r.u32();              // sessionId
-        r.u32();              // clanId
-        r.u32();              // builderLevel
-        r.u32();              // sex
-        const race      = r.u32();
+        const name = r.str();
+        const objectId = r.u32();
+        r.str(); // accountName
+        r.u32(); // sessionId
+        r.u32(); // clanId
+        r.u32(); // builderLevel
+        r.u32(); // sex
+        const race = r.u32();
         const baseClass = r.u32();
-        r.u32();              // serverId
-        r.skip(12);           // x, y, z (3× int)
-        r.skip(8);            // currentHp (double)
-        r.skip(8);            // currentMp (double)
-        r.skip(8);            // sp (long)
-        r.skip(8);            // exp (long)
-        r.skip(8);            // expPercent (double)
-        const level     = r.u32();
+        r.u32(); // serverId  (NOT "active")
+        r.skip(12); // x, y, z  (3× int)
+        r.skip(8); // currentHp (double)
+        r.skip(8); // currentMp (double)
+        r.skip(8); // FIX: sp is LONG (8), was u32
+        r.skip(8); // exp (long)
+        r.skip(8); // FIX: expPercent (double) — was missing
+        const level = r.u32();
+        r.skip(4); // reputation
+        r.skip(4); // pkKills
+        r.skip(4); // pvpKills
+        r.skip(4 * 9); // 9 zero ints (incl. 2 Ertheia)
+        r.skip(4 * PAPERDOLL_ORDER_LEN); // paperdoll item ids (60)
+        r.skip(4 * PAPERDOLL_VISUAL_LEN); // paperdoll visual ids (9)
+        r.skip(2 * 5); // 5 enchant shorts (chest/legs/head/gloves/feet)
+        r.skip(4); // hairStyle
+        r.skip(4); // hairColor
+        r.skip(4); // face
+        r.skip(8); // maxHp (double)
+        r.skip(8); // maxMp (double)
+        r.skip(4); // deleteTimer
+        r.skip(4); // 0
+        r.skip(4); // -1
+        r.skip(4); // classId
+        r.skip(4); // active (i == activeId)
+        r.skip(1); // rhand enchant (byte)
+        r.skip(4 * 3); // augment option1/2/3
+        r.skip(4 * 4); // 4 zero ints (incl. transformation)
+        r.skip(4 * 4); // pet npcId/level/food/foodLevel
+        r.skip(8); // pet HP (double)
+        r.skip(8); // pet MP (double)
+        r.skip(4); // vitalityPoints
+        r.skip(4); // vitalityPercent
+        r.skip(4); // vitalityItemsUsed
+        r.skip(4); // active2 (accessLevel != -100)
+        r.skip(1); // noble (byte)
+        r.skip(1); // heroGlow (byte)
+        r.skip(1); // hairAccessory (byte)
+        r.skip(4); // banTimeLeft
+        r.skip(4); // lastPlayTime
+        r.skip(1); // 338 byte
+        r.skip(4); // dkColor
+        r.skip(4); // 0
+        r.skip(1); // 362 vanguard mount (byte)
+        r.skip(3); // 464 (3 bytes)
+        r.skip(8 * 4); // 493 (4 longs)
+        r.skip(4); // 493 (int)
 
-        // Consume the rest of the per-char block to keep alignment for next char.
-        r.u32();              // reputation
-        r.u32();              // pkKills
-        r.u32();              // pvpKills
-        r.skip(9 * 4);        // 9× int zeros (incl. 2 Ertheia)
-        r.skip(60 * 4);       // paperdoll item ids (60 slots)
-        r.skip(9 * 4);        // paperdoll visual ids (9 slots)
-        r.skip(5 * 2);        // 5× short enchant
-        r.u32();              // hairStyle
-        r.u32();              // hairColor
-        r.u32();              // face
-        r.skip(8);            // maxHp (double)
-        r.skip(8);            // maxMp (double)
-        r.u32();              // deleteTimer
-        r.u32();              // 0
-        r.u32();              // -1
-        r.u32();              // classId
-        r.u32();              // active flag
-        r.u8();               // rhand enchant
-        r.skip(3 * 4);        // 3× augment option
-        r.skip(4 * 4);        // 4× int zeros (incl. transformation)
-        r.skip(4 * 4);        // petNpcId, petLevel, petFood, petFoodLevel
-        r.skip(8);            // petHp (double)
-        r.skip(8);            // petMp (double)
-        r.u32();              // vitalityPoints
-        r.u32();              // vitalityPercent
-        r.u32();              // vitalityItemsUsed
-        r.u32();              // active2
-        r.u8();               // noble
-        r.u8();               // heroGlow
-        r.u8();               // hairAccessory
-        r.u32();              // banTimeLeft
-        r.u32();              // lastPlayTime
-        r.u8();               // 0
-        r.u32();              // dkColor
-        r.u32();              // 0
-        r.u8();               // vanguard mount
-        r.skip(3);            // 3× byte 0
-        r.skip(4 * 8);        // 4× long 0
-        r.u32();              // 0
+        if (r.remaining < 0) {
+          this.emit({
+            type: "status",
+            message: `[GS] char #${i} overran buffer — per-char layout mismatch`,
+          });
+          break;
+        }
 
         chars.push({
           id: objectId.toString(16),
@@ -337,10 +401,14 @@ export class L2GameClient {
           color: colorFromName(name),
         });
       }
+
       this.emit({ type: "status", message: `[GS] parsed ${chars.length} character(s)` });
       this.settle({ type: "characters", chars });
     } catch (err) {
-      this.settle({ type: "error", error: `[GS] CharSelectionInfo parse failed: ${(err as Error).message}` });
+      this.settle({
+        type: "error",
+        error: `[GS] CharSelectionInfo parse failed: ${(err as Error).message}`,
+      });
     }
   }
 }
