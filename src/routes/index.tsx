@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { L2LoginClient, type GameServer, type LoginEvent } from "@/lib/l2-protocol/login-client";
+import { L2GameClient, type GameCharacter, type GameEvent } from "@/lib/l2-protocol/game-client";
 import { getMountStatus, pickFolder, unmount, type MountStatus } from "@/lib/local-mount";
 import { getCacheStats, formatBytes, type CacheStats } from "@/lib/l2-assets";
 import { loadL2Ini, summarize, type L2Summary } from "@/lib/l2-config";
