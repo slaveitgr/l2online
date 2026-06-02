@@ -14,6 +14,7 @@ import { Route as SelectFilesRouteImport } from './routes/select-files'
 import { Route as CharactersRouteImport } from './routes/characters'
 import { Route as CdnCacheRouteImport } from './routes/cdn-cache'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiL2BridgeRouteImport } from './routes/api/l2-bridge'
 import { Route as ApiCdnSplatRouteImport } from './routes/api/cdn/$'
 
 const WorldRoute = WorldRouteImport.update({
@@ -41,6 +42,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiL2BridgeRoute = ApiL2BridgeRouteImport.update({
+  id: '/api/l2-bridge',
+  path: '/api/l2-bridge',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiCdnSplatRoute = ApiCdnSplatRouteImport.update({
   id: '/api/cdn/$',
   path: '/api/cdn/$',
@@ -53,6 +59,7 @@ export interface FileRoutesByFullPath {
   '/characters': typeof CharactersRoute
   '/select-files': typeof SelectFilesRoute
   '/world': typeof WorldRoute
+  '/api/l2-bridge': typeof ApiL2BridgeRoute
   '/api/cdn/$': typeof ApiCdnSplatRoute
 }
 export interface FileRoutesByTo {
@@ -61,6 +68,7 @@ export interface FileRoutesByTo {
   '/characters': typeof CharactersRoute
   '/select-files': typeof SelectFilesRoute
   '/world': typeof WorldRoute
+  '/api/l2-bridge': typeof ApiL2BridgeRoute
   '/api/cdn/$': typeof ApiCdnSplatRoute
 }
 export interface FileRoutesById {
@@ -70,6 +78,7 @@ export interface FileRoutesById {
   '/characters': typeof CharactersRoute
   '/select-files': typeof SelectFilesRoute
   '/world': typeof WorldRoute
+  '/api/l2-bridge': typeof ApiL2BridgeRoute
   '/api/cdn/$': typeof ApiCdnSplatRoute
 }
 export interface FileRouteTypes {
@@ -80,6 +89,7 @@ export interface FileRouteTypes {
     | '/characters'
     | '/select-files'
     | '/world'
+    | '/api/l2-bridge'
     | '/api/cdn/$'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -88,6 +98,7 @@ export interface FileRouteTypes {
     | '/characters'
     | '/select-files'
     | '/world'
+    | '/api/l2-bridge'
     | '/api/cdn/$'
   id:
     | '__root__'
@@ -96,6 +107,7 @@ export interface FileRouteTypes {
     | '/characters'
     | '/select-files'
     | '/world'
+    | '/api/l2-bridge'
     | '/api/cdn/$'
   fileRoutesById: FileRoutesById
 }
@@ -105,6 +117,7 @@ export interface RootRouteChildren {
   CharactersRoute: typeof CharactersRoute
   SelectFilesRoute: typeof SelectFilesRoute
   WorldRoute: typeof WorldRoute
+  ApiL2BridgeRoute: typeof ApiL2BridgeRoute
   ApiCdnSplatRoute: typeof ApiCdnSplatRoute
 }
 
@@ -145,6 +158,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/l2-bridge': {
+      id: '/api/l2-bridge'
+      path: '/api/l2-bridge'
+      fullPath: '/api/l2-bridge'
+      preLoaderRoute: typeof ApiL2BridgeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/cdn/$': {
       id: '/api/cdn/$'
       path: '/api/cdn/$'
@@ -161,6 +181,7 @@ const rootRouteChildren: RootRouteChildren = {
   CharactersRoute: CharactersRoute,
   SelectFilesRoute: SelectFilesRoute,
   WorldRoute: WorldRoute,
+  ApiL2BridgeRoute: ApiL2BridgeRoute,
   ApiCdnSplatRoute: ApiCdnSplatRoute,
 }
 export const routeTree = rootRouteImport
