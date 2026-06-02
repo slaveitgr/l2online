@@ -112,11 +112,11 @@ export class Blowfish {
     const out = new Uint8Array(data);
     const view = new DataView(out.buffer, out.byteOffset, out.byteLength);
     for (let i = 0; i < out.length; i += 8) {
-      const l = view.getUint32(i, false);
-      const r = view.getUint32(i + 4, false);
+      const l = view.getUint32(i, true);
+      const r = view.getUint32(i + 4, true);
       const [dl, dr] = this.decryptBlock(l, r);
-      view.setUint32(i, dl, false);
-      view.setUint32(i + 4, dr, false);
+      view.setUint32(i, dl, true);
+      view.setUint32(i + 4, dr, true);
     }
     return out;
   }
