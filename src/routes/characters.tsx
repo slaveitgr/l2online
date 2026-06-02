@@ -91,7 +91,7 @@ function Characters() {
           <div className="absolute inset-0 bg-gradient-to-br from-blood/20 via-background to-background" />
           <div className="relative z-10 text-center">
             {(() => {
-              const c = CHARS.find((x) => x.id === selected)!;
+              const c = chars.find((x) => x.id === selected) ?? chars[0];
               return (
                 <>
                   <div
