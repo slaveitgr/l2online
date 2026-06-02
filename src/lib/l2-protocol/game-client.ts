@@ -245,44 +245,82 @@ export class L2GameClient {
   // ===== Parsing =====
 
   /**
-   * Best-effort decoder for CharSelectionInfo. Reads count + per-char prefix
-   * (name, objectId, accountName, sessionId, clanId, builderLevel, sex, race,
-   * baseClass, active, x, y, z, hp, mp, sp, exp, level). Stops at level for
-   * each char and scans forward to the next plausible char start. Good enough
-   * to display roster — full parse will come once we render the world.
+   * CharSelectionInfo decoder for Mobius protocol 502 (12.3 Superion).
+   * Layout from gameserver/network/serverpackets/CharSelectionInfo.java.
    */
   private parseCharSelectionInfo(body: Uint8Array) {
     try {
       const r = new PacketReader(body);
-      r.u8(); // opcode
-      const count = r.u8();
+      r.u8();                 // opcode 0x09
+      const count = r.u32();  // count is int, not byte
       if (count > 32) {
         this.settle({ type: "error", error: `[GS] implausible char count: ${count}` });
         return;
       }
-      // Some chronicles add: maxChars (u8), unk (u8) before the array.
-      // We probe by checking next bytes — if they look like a string they belong
-      // to the first character. UCS-2 strings always have an even count, so a
-      // u8 zero followed by an even-aligned payload usually means a count byte.
+      // Header before per-char array:
+      // int MAX_CHARACTERS, byte isMax, byte canPlay, int 2 (KR flag), byte 0, byte 0
+      r.skip(12);
+
       const chars: GameCharacter[] = [];
       for (let i = 0; i < count; i++) {
-        const name = r.str();
-        const objectId = r.u32();
-        r.str();          // accountName
-        r.u32();          // sessionId
-        r.u32();          // clanId
-        r.u32();          // builderLevel
-        r.u32();          // sex
-        const race = r.u32();
+        const name      = r.str();
+        const objectId  = r.u32();
+        r.str();              // accountName
+        r.u32();              // sessionId
+        r.u32();              // clanId
+        r.u32();              // builderLevel
+        r.u32();              // sex
+        const race      = r.u32();
         const baseClass = r.u32();
-        r.u32();          // active
-        r.skip(12);       // x, y, z (i32×3)
-        r.skip(8);        // hp (f64)
-        r.skip(8);        // mp (f64)
-        r.u32();          // sp
-        r.skip(8);        // exp (u64)
-        const level = r.u32();
-        if (r.remaining < 0) break;
+        r.u32();              // serverId
+        r.skip(12);           // x, y, z (3× int)
+        r.skip(8);            // currentHp (double)
+        r.skip(8);            // currentMp (double)
+        r.skip(8);            // sp (long)
+        r.skip(8);            // exp (long)
+        r.skip(8);            // expPercent (double)
+        const level     = r.u32();
+
+        // Consume the rest of the per-char block to keep alignment for next char.
+        r.u32();              // reputation
+        r.u32();              // pkKills
+        r.u32();              // pvpKills
+        r.skip(9 * 4);        // 9× int zeros (incl. 2 Ertheia)
+        r.skip(60 * 4);       // paperdoll item ids (60 slots)
+        r.skip(9 * 4);        // paperdoll visual ids (9 slots)
+        r.skip(5 * 2);        // 5× short enchant
+        r.u32();              // hairStyle
+        r.u32();              // hairColor
+        r.u32();              // face
+        r.skip(8);            // maxHp (double)
+        r.skip(8);            // maxMp (double)
+        r.u32();              // deleteTimer
+        r.u32();              // 0
+        r.u32();              // -1
+        r.u32();              // classId
+        r.u32();              // active flag
+        r.u8();               // rhand enchant
+        r.skip(3 * 4);        // 3× augment option
+        r.skip(4 * 4);        // 4× int zeros (incl. transformation)
+        r.skip(4 * 4);        // petNpcId, petLevel, petFood, petFoodLevel
+        r.skip(8);            // petHp (double)
+        r.skip(8);            // petMp (double)
+        r.u32();              // vitalityPoints
+        r.u32();              // vitalityPercent
+        r.u32();              // vitalityItemsUsed
+        r.u32();              // active2
+        r.u8();               // noble
+        r.u8();               // heroGlow
+        r.u8();               // hairAccessory
+        r.u32();              // banTimeLeft
+        r.u32();              // lastPlayTime
+        r.u8();               // 0
+        r.u32();              // dkColor
+        r.u32();              // 0
+        r.u8();               // vanguard mount
+        r.skip(3);            // 3× byte 0
+        r.skip(4 * 8);        // 4× long 0
+        r.u32();              // 0
 
         chars.push({
           id: objectId.toString(16),
@@ -292,9 +330,6 @@ export class L2GameClient {
           level,
           color: colorFromName(name),
         });
-        // If only one char fits cleanly, stop — better to show 1 real char than
-        // 5 garbled ones.
-        if (chars.length >= 1 && r.remaining < 100) break;
       }
       this.emit({ type: "status", message: `[GS] parsed ${chars.length} character(s)` });
       this.settle({ type: "characters", chars });
