@@ -59,7 +59,11 @@ function Launcher() {
   }
 
   function pushStatus(msg: string) {
-    setStatusLog((l) => [...l.slice(-19), msg]);
+    setStatusLog((l) => {
+      const next = [...l.slice(-199), msg];
+      try { sessionStorage.setItem("l2_gslog", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
   }
 
   const loginRef = useRef<L2LoginClient | null>(null);
