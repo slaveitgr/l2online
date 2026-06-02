@@ -1,44 +1,44 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { WorldViewport } from "@/components/WorldViewport";
+import { L2Hud } from "@/components/hud/L2Hud";
 import { getGameConnection, setGameConnection, type GameEvent } from "@/lib/l2-protocol/game-client";
 
 export const Route = createFileRoute("/world")({
   head: () => ({
     meta: [
-      { title: "World — Lineage II Web" },
-      { name: "description", content: "Real-time WebGL rendering of Lineage 2 maps in the browser." },
+      { title: "World — L2Slave" },
+      { name: "description", content: "Real-time WebGL rendering of L2 maps in the browser." },
     ],
   }),
   component: WorldPage,
 });
 
+interface ActiveChar { name: string; level: number; klass?: string; race?: string }
+
 function WorldPage() {
   const navigate = useNavigate();
+  const [char, setChar] = useState<ActiveChar>({ name: "Hero", level: 1 });
   const [packetCount, setPacketCount] = useState(0);
-  const [lastOpcode, setLastOpcode] = useState<number | null>(null);
-  const [recent, setRecent] = useState<string[]>([]);
 
   useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("l2.activeChar");
+      if (raw) setChar(JSON.parse(raw));
+    } catch { /* ignore */ }
+
     const conn = getGameConnection();
     if (!conn || !conn.connected) {
       navigate({ to: "/" });
       return;
     }
     conn.setEventHandler((ev: GameEvent) => {
-      console.log("[GS world]", ev);
       if (ev.type === "world-packet") {
         setPacketCount((n) => n + 1);
-        setLastOpcode(ev.opcode);
-        setRecent((r) => [
-          ...r.slice(-19),
-          `0x${ev.opcode.toString(16).padStart(2, "0")} (${ev.length}B)`,
-        ]);
       } else if (ev.type === "closed") {
         setGameConnection(null);
       }
     });
-    // No disconnect on unmount — only the Exit button tears down the socket.
   }, [navigate]);
 
   function exitWorld() {
@@ -49,31 +49,11 @@ function WorldPage() {
   }
 
   return (
-    <div className="fixed inset-0 flex flex-col bg-background">
-      <header className="border-b border-border/60 px-4 py-2 flex items-center justify-between bg-background/80 backdrop-blur z-10">
-        <Link to="/characters" className="flex items-center gap-3 group">
-          <div className="w-7 h-7 rounded-sm bg-gradient-to-br from-primary to-blood flex items-center justify-center font-display text-primary-foreground font-bold text-sm">L</div>
-          <div className="font-display text-gold text-sm tracking-widest group-hover:brightness-125 transition">L2SLAVE — WORLD</div>
-        </Link>
-        <div className="flex items-center gap-3">
-          <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-widest">
-            pkts {packetCount}{lastOpcode != null ? ` · last 0x${lastOpcode.toString(16).padStart(2, "0")}` : ""}
-          </span>
-          <button onClick={exitWorld} className="text-xs border border-border rounded px-3 py-1 hover:bg-accent hover:border-gold-muted transition">
-            Exit
-          </button>
-        </div>
-      </header>
-      <div className="flex-1 relative">
-        <WorldViewport />
-        {recent.length > 0 && (
-          <div className="absolute bottom-3 left-3 panel rounded p-2 max-w-xs text-[10px] font-mono text-muted-foreground pointer-events-none">
-            <div className="text-gold/80 mb-1 tracking-widest">WORLD PACKETS</div>
-            <div className="space-y-0.5 max-h-40 overflow-hidden">
-              {recent.slice(-10).map((s, i) => <div key={i}>{s}</div>)}
-            </div>
-          </div>
-        )}
+    <div className="fixed inset-0 bg-background overflow-hidden">
+      <WorldViewport />
+      <L2Hud charName={char.name} charLevel={char.level} onExit={exitWorld} />
+      <div className="absolute top-1.5 left-1/2 -translate-x-1/2 text-[8px] font-mono text-muted-foreground tracking-widest pointer-events-none z-50">
+        L2SLAVE · pkts {packetCount}
       </div>
     </div>
   );

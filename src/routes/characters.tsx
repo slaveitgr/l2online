@@ -73,6 +73,12 @@ function Characters() {
       } else if (ev.type === "in-world") {
         inWorldRef.current = true;
         appendLog(ev.message);
+        const cur = chars.find((c) => c.id === selected) ?? chars[slot];
+        if (cur) {
+          try {
+            sessionStorage.setItem("l2.activeChar", JSON.stringify({ name: cur.name, level: cur.level, klass: cur.klass, race: cur.race }));
+          } catch { /* ignore */ }
+        }
         navigate({ to: "/world" });
       } else if (ev.type === "error") {
         setEnterError(ev.error);
