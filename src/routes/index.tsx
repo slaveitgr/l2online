@@ -150,9 +150,9 @@ function Launcher() {
             <div>
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">IndexedDB cache</p>
               <p className="text-foreground">
-                {cache ? `${cache.fileCount} files · ${formatBytes(cache.totalBytes)}` : "—"}
+                {cache ? `${cache.cachedFiles} / ${cache.totalFiles} files · ${formatBytes(cache.cachedBytes)}` : "—"}
               </p>
-              {cache && cache.fileCount > 0 && (
+              {cache && cache.cachedFiles > 0 && (
                 <p className="text-[10px] text-muted-foreground mt-0.5">Falls back to CDN proxy if missing</p>
               )}
             </div>
