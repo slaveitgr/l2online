@@ -93,16 +93,14 @@ export async function readFromMount(path: string): Promise<Uint8Array | null> {
 }
 
 async function findDirChild(dir: DirHandle, nameLower: string): Promise<DirHandle | null> {
-  // @ts-expect-error async iterator is part of the standard but missing in TS lib
-  for await (const [name, handle] of dir.entries()) {
+  for await (const [name, handle] of (dir as unknown as AsyncIterable<[string, FileSystemHandle]>)) {
     if (handle.kind === "directory" && name.toLowerCase() === nameLower) return handle as DirHandle;
   }
   return null;
 }
 
 async function findFileChild(dir: DirHandle, nameLower: string): Promise<FileSystemFileHandle | null> {
-  // @ts-expect-error async iterator
-  for await (const [name, handle] of dir.entries()) {
+  for await (const [name, handle] of (dir as unknown as AsyncIterable<[string, FileSystemHandle]>)) {
     if (handle.kind === "file" && name.toLowerCase() === nameLower) return handle as FileSystemFileHandle;
   }
   return null;
