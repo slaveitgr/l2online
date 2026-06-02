@@ -27,7 +27,25 @@
  */
 import { Blowfish } from "./blowfish";
 import { packAuthLoginBlock, rsaEncryptBlock, unscrambleModulus } from "./rsa";
-import { appendChecksumAndPad, PacketReader, PacketWriter } from "./packets";
+import { appendChecksumAndPad, decXORPass, PacketReader, PacketWriter } from "./packets";
+
+/**
+ * Static Blowfish key used by L2J Mobius for the very first Init packet
+ * (see `loginserver/network/LoginEncryption.STATIC_BLOWFISH_KEY`).
+ */
+const STATIC_BLOWFISH_KEY = new Uint8Array([
+  0x6b, 0x60, 0xcb, 0x5b, 0x82, 0xce, 0x90, 0xb1,
+  0xcc, 0x2b, 0x6c, 0x55, 0x6c, 0x6c, 0x6c, 0x6c,
+]);
+
+function hex(b: Uint8Array, max = 48): string {
+  const n = Math.min(b.length, max);
+  let s = "";
+  for (let i = 0; i < n; i++) s += (i ? " " : "") + b[i].toString(16).padStart(2, "0");
+  if (b.length > max) s += ` …(+${b.length - max})`;
+  return s;
+}
+
 
 export type LoginEvent =
   | { type: "status"; message: string }
