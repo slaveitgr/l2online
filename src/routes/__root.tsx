@@ -63,8 +63,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lineage II — Web Client" },
-      { name: "description", content: "Experimental browser-based Lineage 2 client. Render your own Interlude client assets in WebGL." },
+      { title: "Lineage II Slave — Web Client" },
+      { name: "description", content: "Experimental browser-based Lineage 2 client. Render your own  client assets in WebGL." },
+      { property: "og:title", content: "Lineage II Slave — Web Client" },
+      { name: "twitter:title", content: "Lineage II Slave — Web Client" },
+      { property: "og:description", content: "Experimental browser-based Lineage 2 client. Render your own  client assets in WebGL." },
+      { name: "twitter:description", content: "Experimental browser-based Lineage 2 client. Render your own  client assets in WebGL." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/b39e9acc-bde9-4fce-86c9-3e2832e501e0/id-preview-610255d3--a18c83ac-4878-4877-8392-bcb978e5acd7.lovable.app-1780418619914.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/b39e9acc-bde9-4fce-86c9-3e2832e501e0/id-preview-610255d3--a18c83ac-4878-4877-8392-bcb978e5acd7.lovable.app-1780418619914.png" },
+      { name: "twitter:card", content: "summary_large_image" },
+      { property: "og:type", content: "website" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
