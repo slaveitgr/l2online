@@ -34,14 +34,17 @@ export const Route = createFileRoute("/api/l2-bridge")({
         if (!ALLOWED_PORTS.has(port)) return bad(403, `Port not allowed: ${port}`);
 
         // Dynamic import — `cloudflare:sockets` only exists in the Worker runtime.
-        let connect: (opts: { hostname: string; port: number }) => {
+        type TcpSocket = {
           readable: ReadableStream<Uint8Array>;
           writable: WritableStream<Uint8Array>;
           close(): Promise<void>;
           closed: Promise<void>;
         };
+        let connect: (opts: { hostname: string; port: number }) => TcpSocket;
         try {
-          ({ connect } = (await import(/* @vite-ignore */ "cloudflare:sockets")) as never);
+          // @ts-expect-error cloudflare:sockets is provided by the Workers runtime
+          const mod = await import(/* @vite-ignore */ "cloudflare:sockets");
+          connect = mod.connect as typeof connect;
         } catch (err) {
           return bad(500, `Raw TCP not available in this runtime: ${(err as Error).message}`);
         }
@@ -81,7 +84,10 @@ export const Route = createFileRoute("/api/l2-bridge")({
               const { value, done } = await reader.read();
               if (done) break;
               if (value && value.byteLength > 0 && !closed) {
-                server.send(value);
+                // Copy into a fresh ArrayBuffer to satisfy WebSocket.send typing.
+                const ab = new ArrayBuffer(value.byteLength);
+                new Uint8Array(ab).set(value);
+                server.send(ab);
               }
             }
           } catch (err) {
