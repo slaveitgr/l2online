@@ -59,9 +59,19 @@ export interface StaticMeshGeometry {
   name: string;
   positions: Float32Array; // xyz per vertex
   normals: Float32Array; // xyz per vertex
+  uvs: Float32Array | null; // uv per vertex (primary stream), null if absent
   indices: Uint16Array; // triangle indices
   vertexCount: number;
   triangleCount: number;
+}
+
+/** A resolved object reference (from an ObjectProperty / class/super index). */
+export interface RefTarget {
+  kind: "import" | "export" | "none";
+  name: string;
+  className: string;
+  pkg: string; // for imports: owning package; for local exports: "(this)"
+  localExportIndex: number; // 1-based export index if kind==="export", else 0
 }
 export interface ActorPlacement {
   className: string;
@@ -251,6 +261,143 @@ export class L2Package {
   /** Find an export by object name (e.g. a StaticMesh). */
   findExport(name: string): UExport | undefined {
     return this.exports.find((e) => e.objectName === name);
+  }
+
+  /** Resolve an object reference index → full target (import package / local export). */
+  resolveRefFull(idx: number): RefTarget {
+    if (idx < 0) {
+      const imp = this.imports[-idx - 1];
+      if (!imp) return { kind: "none", name: "?", className: "?", pkg: "?", localExportIndex: 0 };
+      let o = imp.outer;
+      let pkg = "?";
+      for (let i = 0; i < 8 && o < 0; i++) {
+        const p = this.imports[-o - 1];
+        if (!p) break;
+        pkg = p.objectName;
+        o = p.outer;
+      }
+      return { kind: "import", name: imp.objectName, className: imp.className, pkg, localExportIndex: 0 };
+    }
+    if (idx > 0) {
+      const e = this.exports[idx - 1];
+      return {
+        kind: "export",
+        name: e?.objectName ?? "?",
+        className: e?.className ?? "?",
+        pkg: "(this)",
+        localExportIndex: idx,
+      };
+    }
+    return { kind: "none", name: "", className: "", pkg: "", localExportIndex: 0 };
+  }
+
+  /** All ObjectProperty references of an export, keyed by property name (Material, Diffuse, …). */
+  objectRefs(e: UExport): Record<string, number> {
+    const refs: Record<string, number> = {};
+    this.walkProps(e, (nm, ptype, valueOff) => {
+      if (ptype === 0x05 && !(nm in refs)) refs[nm] = readCompat32(this.bytes, valueOff)[0]; // ObjectProperty
+    });
+    return refs;
+  }
+
+  /** First material object-ref of a StaticMesh (from the Materials array element's "Material" prop). */
+  meshMaterialRef(nameOrExport: string | UExport): number | null {
+    const e = typeof nameOrExport === "string" ? this.findExport(nameOrExport) : nameOrExport;
+    if (!e) return null;
+    let arrOff = -1;
+    let arrLen = 0;
+    this.walkProps(e, (nm, ptype, valueOff, dsz) => {
+      if (nm === "Materials" && ptype === 0x09) {
+        arrOff = valueOff;
+        arrLen = dsz;
+      }
+    });
+    if (arrOff < 0) return null;
+    // array: compat32 count, then element = tagged props; find "Material" ObjectProperty
+    const b = this.bytes;
+    let o = arrOff;
+    o += readCompat32(b, o)[1]; // count
+    const end = arrOff + arrLen;
+    let ref: number | null = null;
+    while (o < end) {
+      const [ni, s] = readCompat32(b, o);
+      o += s;
+      if (this.nm(ni) === "None") break;
+      const info = b[o];
+      o += 1;
+      const ptype = info & 0x0f,
+        szc = info & 0x70,
+        isArray = info & 0x80;
+      if (ptype === 0x0a) o += readCompat32(b, o)[1];
+      let d: number;
+      if (szc in STATIC_SIZES) d = STATIC_SIZES[szc];
+      else if (szc === 0x50) {
+        d = b[o];
+        o += 1;
+      } else if (szc === 0x60) {
+        d = this.dv.getUint16(o, true);
+        o += 2;
+      } else if (szc === 0x70) {
+        d = this.dv.getUint32(o, true);
+        o += 4;
+      } else d = 0;
+      if (isArray && ptype !== 0x03) o += 1;
+      if (ptype === 0x03) continue;
+      if (this.nm(ni) === "Material" && ptype === 0x05) {
+        ref = readCompat32(b, o)[0];
+        break;
+      }
+      o += d;
+    }
+    return ref;
+  }
+
+  /** Walk an export's tagged properties, calling cb(name, ptype, valueOffset, dataSize). */
+  private walkProps(e: UExport, cb: (name: string, ptype: number, valueOff: number, dsz: number) => void) {
+    const b = this.bytes;
+    const dv = this.dv;
+    let o = e.offset;
+    const end = e.offset + e.size;
+    if (e.flags & RF_HAS_STACK) {
+      const [nid, s1] = readCompat32(b, o);
+      o += s1;
+      o += readCompat32(b, o)[1];
+      o += 8;
+      o += 4;
+      if (nid !== 0) o += readCompat32(b, o)[1];
+    }
+    let guard = 0;
+    while (o < end && guard++ < 400) {
+      const [ni, s] = readCompat32(b, o);
+      o += s;
+      const nm = this.nm(ni);
+      if (nm === "None") break;
+      const info = b[o];
+      o += 1;
+      const ptype = info & 0x0f,
+        szc = info & 0x70,
+        isArray = info & 0x80;
+      if (ptype === 0x0a) o += readCompat32(b, o)[1];
+      let dsz: number;
+      if (szc in STATIC_SIZES) dsz = STATIC_SIZES[szc];
+      else if (szc === 0x50) {
+        dsz = b[o];
+        o += 1;
+      } else if (szc === 0x60) {
+        dsz = dv.getUint16(o, true);
+        o += 2;
+      } else if (szc === 0x70) {
+        dsz = dv.getUint32(o, true);
+        o += 4;
+      } else dsz = 0;
+      if (isArray && ptype !== 0x03) o += 1;
+      if (ptype === 0x03) {
+        cb(nm, ptype, o, 0);
+        continue;
+      }
+      cb(nm, ptype, o, dsz);
+      o += dsz;
+    }
   }
 
   /** Resolve an object reference (compat32): <0 import, >0 export → {name, pkg}. */
@@ -478,18 +625,24 @@ export class L2Package {
     skip(na * 4);
     skip(4); // alphaStream
     const nuv = ci();
+    let uvs: Float32Array | null = null;
     for (let i = 0; i < nuv; i++) {
       const us = ci();
+      if (i === 0) {
+        // first UV stream = primary texture coords (2 floats per vertex)
+        uvs = new Float32Array(us * 2);
+        for (let k = 0; k < us * 2; k++) uvs[k] = dv.getFloat32(cur.o + k * 4, true);
+      }
       skip(us * 8);
-      skip(8);
-    } // uvStream + 2×int32
+      skip(8); // uvStream data + 2×int32
+    }
 
     const I = ci();
     const ibase = cur.o;
     const indices = new Uint16Array(I);
     for (let i = 0; i < I; i++) indices[i] = dv.getUint16(ibase + i * 2, true);
 
-    return { name: e.objectName, positions, normals, indices, vertexCount: V, triangleCount: (I / 3) | 0 };
+    return { name: e.objectName, positions, normals, indices, uvs, vertexCount: V, triangleCount: (I / 3) | 0 };
   }
 
   /** Histogram of export class names — quick "what's in this map". */
