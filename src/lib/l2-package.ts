@@ -538,7 +538,20 @@ export class L2Package {
       }
     }
     if (dataOff < 0) return null;
-    return { name: e.objectName, width: uSize, height: vSize, format, data: b.slice(dataOff, dataOff + topLen) };
+    let data = b.slice(dataOff, dataOff + topLen);
+    // RGBA8 is stored BGRA on disk → swizzle to RGBA so it's a ready-to-use
+    // uncompressed image (for a three.js DataTexture or a canvas/ImageData).
+    if (format === "RGBA8") {
+      const rgba = new Uint8Array(topLen);
+      for (let i = 0; i < topLen; i += 4) {
+        rgba[i] = data[i + 2];
+        rgba[i + 1] = data[i + 1];
+        rgba[i + 2] = data[i];
+        rgba[i + 3] = data[i + 3];
+      }
+      data = rgba;
+    }
+    return { name: e.objectName, width: uSize, height: vSize, format, data };
   }
 
   /**
