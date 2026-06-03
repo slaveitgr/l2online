@@ -191,6 +191,17 @@ export function readIndexedTerrainInfos(pkg: L2Package): IndexedTerrainInfo[] {
 
 export function bitsetHas(raw: UnrealRawArray | null, index: number): boolean {
   if (!raw || index < 0) return false;
+  if (raw.bytes.length === raw.count * 4) {
+    const word = index >> 5;
+    const byteOffset = word * 4;
+    if (byteOffset + 3 >= raw.bytes.length) return false;
+    const value =
+      raw.bytes[byteOffset] |
+      (raw.bytes[byteOffset + 1] << 8) |
+      (raw.bytes[byteOffset + 2] << 16) |
+      (raw.bytes[byteOffset + 3] << 24);
+    return (value & (1 << (index & 31))) !== 0;
+  }
   const byte = raw.bytes[index >> 3];
   if (byte === undefined) return false;
   return (byte & (1 << (index & 7))) !== 0;
