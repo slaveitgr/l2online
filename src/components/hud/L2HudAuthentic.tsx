@@ -18,8 +18,8 @@
  */
 import { useEffect, useState } from "react";
 import { getGameConnection, type GameEvent, type PlayerState } from "@/lib/l2-protocol/game-client";
-import { L2Frame, L2Slot, L2Sprite } from "@/components/l2/L2Sprite";
-import { L2Gauge } from "@/components/l2/L2Gauge";
+import { L2Frame, L2Slot, L2Sprite } from "@/components/hud/L2Sprite";
+import { L2Gauge } from "@/components/hud/L2Gauge";
 
 interface ChatLine { color: string; text: string }
 
