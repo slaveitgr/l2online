@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { WorldViewport } from "@/components/WorldViewport";
 import { L2HudAuthentic } from "@/components/hud/L2HudAuthentic";
+import { SpriteProvider } from "@/components/hud/L2Sprite";
 import { MobileGameHud } from "@/components/mobile/MobileGameHud";
 import { RotateDeviceOverlay } from "@/components/mobile/RotateDeviceOverlay";
 import { useIsMobileGame } from "@/hooks/useIsMobileGame";
@@ -113,27 +114,29 @@ function WorldPage() {
         onGroundTap={(x, y, z) => getGameConnection()?.sendMoveTo(x, y, z)}
       />
 
-      {isMobile ? (
-        isLandscape ? (
-          <MobileGameHud
-            targetId={targetId}
-            onAttack={() => {
-              const id = getSelectedTarget();
-              if (id != null) getGameConnection()?.sendAttack(id);
-            }}
-            onInteract={() => {
-              const id = getSelectedTarget();
-              if (id != null) getGameConnection()?.sendAction(id);
-            }}
-            onMove={handleJoystick}
-            onSay={(text) => getGameConnection()?.sendSay(text)}
-          />
+      <SpriteProvider>
+        {isMobile ? (
+          isLandscape ? (
+            <MobileGameHud
+              targetId={targetId}
+              onAttack={() => {
+                const id = getSelectedTarget();
+                if (id != null) getGameConnection()?.sendAttack(id);
+              }}
+              onInteract={() => {
+                const id = getSelectedTarget();
+                if (id != null) getGameConnection()?.sendAction(id);
+              }}
+              onMove={handleJoystick}
+              onSay={(text) => getGameConnection()?.sendSay(text)}
+            />
+          ) : (
+            <RotateDeviceOverlay />
+          )
         ) : (
-          <RotateDeviceOverlay />
-        )
-      ) : (
-        <L2HudAuthentic />
-      )}
+          <L2HudAuthentic />
+        )}
+      </SpriteProvider>
 
       <div className="absolute top-1.5 left-1/2 -translate-x-1/2 text-[8px] font-mono text-muted-foreground tracking-widest pointer-events-none z-50">
         L2SLAVE · pkts {packetCount}
