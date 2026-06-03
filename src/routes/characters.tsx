@@ -131,6 +131,7 @@ function Characters() {
           /* not implemented yet */
         }}
         onBack={exitToLauncher}
+        renderModel={(c) => <CharacterModel race={c?.className2} gender="F" />}
       />
       {enterError && (
         <div
