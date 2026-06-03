@@ -1,84 +1,55 @@
 
-# Πιστή αναπαραγωγή του αυθεντικού L2 UI
+# Mobile Game HUD πάνω από /world
 
-Στόχος: τα τρία screens (Login / Server Select / Character Select) να μοιάζουν με τον πραγματικό client αντί για το τωρινό "fantasy launcher" look.
+Ξεχωριστό overlay layer για mobile, χωρίς να αγγίξουμε το desktop `L2HudAuthentic` ή το `WorldViewport` rendering. Επιλογή HUD γίνεται στο `world.tsx` με βάση mobile detection.
 
-## Κοινά design tokens (src/styles.css)
+## Phase 1 — Foundations (αυτό το loop)
 
-- Fullscreen artwork ως background (cover, no panels χρώματος), χωρίς το radial gradient που υπάρχει σήμερα στο body.
-- Νέο `.l2-frame` utility: μικρό modal με μαύρο gradient fill (`oklch(0.10 0 0 / 0.85)`), 1px gold border (`#a88a4a`), inset highlight, ελαφρύ outer glow — αυτό το "etched bronze plate" frame που έχουν όλα τα L2 panels.
-- Νέο `.l2-button`: pill-shaped, σκοτεινό μπλε-μαύρο gradient με thin gold stroke, μικρό uppercase serif text (Cinzel ή system serif), hover = brighten + subtle gold glow.
-- Νέο `.l2-input`: ίδιο pill frame αλλά κενό κέντρο, centered placeholder text σε muted gold.
-- Footer bar: λεπτή σκούρα μπάρα κάτω-κάτω με `NC | LINEAGE II` + `4game.com` + copyright (όπως στα screenshots).
-- Side menu (κάτω-δεξιά): mini vertical list `New Account / Lost Account / Links / Settings` με μικρά iconάκια, ultra-thin type.
+### 1. PWA landscape
+- `public/manifest.webmanifest` με `display: fullscreen`, `orientation: landscape`, icons placeholders (192/512).
+- `src/routes/__root.tsx` head(): προσθήκη `<link rel="manifest">`, `theme-color`, `mobile-web-app-capable`, `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`.
+- `src/lib/mobile/orientation.ts`: `lockLandscape()` με try/catch γύρω από `screen.orientation.lock("landscape")`. Καλείται σε user gesture / on mount στο /world (silent fail σε browsers που δεν υποστηρίζουν).
 
-## 1. Login screen (`src/routes/index.tsx`)
+**Σημείωση**: ΔΕΝ προσθέτουμε `vite-plugin-pwa` ή service worker — μόνο manifest για installability + orientation preference. Αυτό αποφεύγει cache/preview προβλήματα.
 
-Refactor μόνο της παρουσίασης — η login logic, οι l2-bridge calls, και το protocol log μένουν ίδια.
+### 2. Mobile detection
+- `src/hooks/useIsMobileGame.ts`: επιστρέφει `{ isMobile, isLandscape }` βάσει `matchMedia("(pointer: coarse)")` + viewport width < 900, με listeners για `resize` / `orientationchange`. SSR-safe (initial `false`, set στο `useEffect`).
 
-- Fullscreen background: το "chained beast" artwork (gradient placeholder από CSS αν δεν υπάρχει asset, με slot για να μπει αργότερα real image).
-- Κεντρικά κάτω από το μέσο: μικρό `l2-frame` με δύο inputs (Username, Password) στοιβαγμένα, και δύο buttons δίπλα-δίπλα `Log In` / `Exit`. Πολύ compact (max-w ~360px).
-- Πάνω από τα inputs: server/status indicators (τωρινό status badge), σε μία γραμμή με thin type.
-- Κάτω-δεξιά corner menu (New Account / Lost Account / Links / Settings) — links σε εξωτερικά docs ή noop για τώρα.
-- Footer bar.
-- Protocol log: μετακινείται σε collapsible κάτω-αριστερά (τύπου `<details>` με `Credits/Exit` style), για να μη χαλάει την εικόνα.
+### 3. Rotate overlay
+- `src/components/mobile/RotateDeviceOverlay.tsx`: fullscreen z-9999 panel, semantic tokens (`text-gold`, `text-muted-foreground`).
 
-## 2. Server Select (νέο intermediate state ή dialog στο index)
+### 4. Mobile HUD shell
+- `src/components/mobile/MobileGameHud.tsx`: το layout από το μήνυμα — player panel (HP/MP/CP bars), minimap, chat toggle, virtual joystick, target panel, action buttons (attack/interact/potion + 4 skill slots). Tailwind arbitrary values (`bottom-[62px]`) όπου χρειάζεται. Props: `onAttack?`, `onInteract?`, `onMove?(dx, dy)`.
+- `VirtualJoystick`: pointer events με `setPointerCapture`, υπολογίζει normalized dx/dy και καλεί `onMove` (Phase 2 το hooks σε packets).
+- Όλα `pointer-events-none` στο outer, `pointer-events-auto` σε interactive children.
 
-Στο πραγματικό client, μετά το login εμφανίζεται μικρό dialog `Server: [list]  [OK] [Cancel]`. Σήμερα η εφαρμογή πάει κατευθείαν από login → characters. 
+### 5. Glass UI CSS
+- `src/styles.css` `@layer utilities`: `.l2-mobile-panel` (gold border, dark gradient, backdrop-blur, inset highlight) και `.mobile-game-hud` (`touch-action: none`, no select).
 
-- Προσθήκη state `phase: "login" | "server-select" | "loading"` στο `index.tsx`.
-- Όταν έρθει η server list, εμφανίζεται modal `l2-frame` πάνω από το ίδιο background: label `Server`, dropdown με τα ονόματα servers, ετικέτες `Lineage 2` / `Light` indicators, `OK` / `Cancel` buttons.
-- `OK` → προχωράει στο GS handshake (όπως τώρα γίνεται αυτόματα).
-- `Cancel` → επιστροφή στο login frame.
+### 6. Wire-up στο /world
+- `src/routes/world.tsx`: import hook + νέα components, conditional render — desktop ⇒ `L2HudAuthentic`, mobile portrait ⇒ `RotateDeviceOverlay`, mobile landscape ⇒ `MobileGameHud`. `useEffect` καλεί `lockLandscape()` όταν `isMobile`.
 
-## 3. Character Select (`src/routes/characters.tsx`)
+## Phase 2 — Action wiring (επόμενο loop, μόλις εγκριθεί η Phase 1)
 
-Πλήρης οπτική αναμόρφωση για να μοιάζει με το screenshot #1.
+Προσθήκη methods στο `src/lib/l2-protocol/game-client.ts`:
+- `sendMoveTo(x, y, z)`
+- `sendAttack(objectId)`
+- `sendAction(objectId)` (target / interact)
+- `sendSay(text, channel)`
 
-Layout:
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Select Character                                            │  ← top-left label, no header bar
-│                                                             │
-│         [FULLSCREEN CITY/CHARACTER ARTWORK]      ┌────────┐ │
-│                                                  │ slot 1 │ │ ← right column
-│                                                  │ slot 2 │ │   character cards
-│                                                  │   +    │ │   (compact, gold-bordered)
-│                                                  │   +    │ │
-│                                                  └────────┘ │
-│                                                             │
-│                    ┌──────────────────┐                     │
-│                    │ Name             │                     │
-│                    │ Lv.X Class       │                     │
-│                    │ HP ▓▓▓▓ MP ▓▓▓▓  │                     │  ← center-bottom stats panel
-│                    │ XP ▓▓▓▓ SP 0     │                     │
-│                    └──────────────────┘                     │
-│                          [ Play ]                           │
-│ Credits                                       Create Delete │  ← bottom corners
-│ Exit                                                        │
-└─────────────────────────────────────────────────────────────┘
-```
+Το `MobileGameHud` καλεί `getGameConnection()?.sendXxx(...)`. Το UI δεν φτιάχνει bytes — μόνο calls. Στη συνέχεια tap-to-target / tap-to-move από το canvas (raycast στο `WorldViewport`, expose callback prop).
 
-Συγκεκριμένα:
-- Background: fullscreen artwork (city skyline placeholder, με slot για asset).
-- Top-left: μικρό text "Select Character" (όχι ολόκληρο header bar).
-- Right column (w-64): vertical stack από character slots. Selected = highlighted gold border με thumbnail + `Lv.XX` + class + name. Empty slots = `+` πλακάκι.
-- Bottom-center: compact stats panel (`l2-frame`) με HP/MP/VP/XP/SP bars (HP=κόκκινο, MP=μπλε, VP=πορτοκαλί, XP=γκρι), και name/level/class από πάνω.
-- Bottom-center κάτω από stats: `[ Play ]` button (l2-button, large).
-- Bottom-left: `Credits` και `Exit` plain text buttons (small, low-key).
-- Bottom-right: `Create` και `Delete` plain text buttons.
-- Αφαίρεση: του τωρινού huge avatar circle, του gradient overlay, του "ENTERING…" button — γίνεται plain `Play` με loading state.
-- Protocol log: collapsible `<details>` που εμφανίζεται μόνο while entering ή on error (κάτω-αριστερά πάνω από Credits/Exit).
+## Out of scope τώρα
 
-## Out of scope
+- Service worker / offline.
+- Πραγματικά εικονίδια PWA (placeholders).
+- Skill cooldowns, drag-to-rearrange skillbar, inventory UI.
+- Καμία αλλαγή σε desktop HUD ή Three.js scene.
 
-- Δεν αλλάζει καμία logic σε login/GS handshake/protocol parsing.
-- Δεν αλλάζει το `/world` route.
-- Δεν φέρνουμε πραγματικά game assets (artworks/icons) — αφήνουμε placeholders/CSS gradients με σαφή slots ώστε να γίνει drop-in αργότερα.
+## Files
 
-## Technical notes
+**New**: `public/manifest.webmanifest`, `src/lib/mobile/orientation.ts`, `src/hooks/useIsMobileGame.ts`, `src/components/mobile/RotateDeviceOverlay.tsx`, `src/components/mobile/MobileGameHud.tsx`.
 
-- Όλες οι νέες κλάσεις (`l2-frame`, `l2-button`, `l2-input`, `l2-stat-bar`) μπαίνουν στο `@layer utilities` του `src/styles.css` ώστε να χρησιμοποιούν τα ήδη υπάρχοντα tokens (gold, blood, panel).
-- Καμία νέα dependency.
-- 3 αρχεία αλλάζουν: `src/styles.css`, `src/routes/index.tsx`, `src/routes/characters.tsx`.
+**Edited**: `src/routes/__root.tsx` (head links), `src/styles.css` (utilities), `src/routes/world.tsx` (conditional HUD).
+
+Έτοιμος να προχωρήσω με Phase 1 μόλις πεις ναι;
