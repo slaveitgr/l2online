@@ -24,7 +24,12 @@
  */
 import * as THREE from "three";
 import { L2Package, type MapPlacement, type L2Texture, type UExport } from "./l2-package";
-import { readIndexedMapPlacements, readIndexedTerrainInfos } from "./l2-unreal-object-index";
+import {
+  bitsetHas,
+  readIndexedMapPlacements,
+  readIndexedTerrainInfos,
+  type IndexedTerrainInfo,
+} from "./l2-unreal-object-index";
 
 export type PackageSource = (packageName: string) => Promise<ArrayBuffer | null>;
 
@@ -68,6 +73,62 @@ function toThreeTexture(t: L2Texture): THREE.Texture | null {
   tex.flipY = false;
   tex.needsUpdate = true;
   return tex;
+}
+
+function buildTerrainMesh(terrain: IndexedTerrainInfo, heightmap: L2Texture): THREE.Mesh | null {
+  if (heightmap.format !== "G16" || heightmap.width < 2 || heightmap.height < 2) return null;
+  if (heightmap.data.byteLength < heightmap.width * heightmap.height * 2) return null;
+
+  const width = heightmap.width;
+  const height = heightmap.height;
+  const sx = terrain.terrainScale[0] || 128;
+  const sy = terrain.terrainScale[1] || 128;
+  const sz = (terrain.terrainScale[2] || 76) / 256;
+  const brokenScale = terrain.terrainScale[0] === 0 || terrain.terrainScale[1] === 0 || terrain.terrainScale[2] === 0;
+  const baseX = brokenScale ? (terrain.mapX - 20) * width * 128 : terrain.location[0] - (width / 2) * sx;
+  const baseY = brokenScale ? (terrain.mapY - 18) * height * 128 : terrain.location[1] - (height / 2) * sy;
+  const baseZ = brokenScale ? 0 : terrain.location[2] - 32768 * sz;
+
+  const positions = new Float32Array(width * height * 3);
+  const uvs = new Float32Array(width * height * 2);
+  const dv = new DataView(heightmap.data.buffer, heightmap.data.byteOffset, heightmap.data.byteLength);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = x + y * width;
+      const h = dv.getUint16(i * 2, true);
+      positions[i * 3] = baseX + x * sx;
+      positions[i * 3 + 1] = baseY + y * sy;
+      positions[i * 3 + 2] = baseZ + h * sz;
+      uvs[i * 2] = x / Math.max(1, width - 1);
+      uvs[i * 2 + 1] = y / Math.max(1, height - 1);
+    }
+  }
+
+  const indices: number[] = [];
+  for (let y = 0; y < height - 1; y++) {
+    for (let x = 0; x < width - 1; x++) {
+      const q = x + y * width;
+      if (terrain.quadVisibilityBitmap && !bitsetHas(terrain.quadVisibilityBitmap, q)) continue;
+      const a = x + y * width;
+      const b = x + 1 + y * width;
+      const c = x + 1 + (y + 1) * width;
+      const d = x + (y + 1) * width;
+      if (terrain.edgeTurnBitmap && bitsetHas(terrain.edgeTurnBitmap, q)) indices.push(d, a, b, d, b, c);
+      else indices.push(a, b, c, a, c, d);
+    }
+  }
+  if (indices.length === 0) return null;
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geometry.setIndex(indices.length > 65535 ? indices : new Uint16Array(indices));
+  geometry.computeVertexNormals();
+  const material = new THREE.MeshStandardMaterial({ color: 0x5c6b3a, roughness: 1, metalness: 0 });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = `Terrain:${terrain.mapX}_${terrain.mapY}`;
+  mesh.receiveShadow = true;
+  return mesh;
 }
 
 export async function loadMap(
@@ -176,6 +237,19 @@ export async function loadMap(
 
   const l2Group = new THREE.Group();
   const fallbackMat = new THREE.MeshStandardMaterial({ color: 0x8d8270, roughness: 0.92 });
+
+  let terrainMeshes = 0;
+  for (const terrain of terrains) {
+    if (!terrain.terrainMap) continue;
+    const target = terrain.terrainMap.target;
+    const terrainPkg = await getPkg(target.pkg);
+    const terrainTexture = terrainPkg?.readTexture(target.name);
+    const terrainMesh = terrainTexture ? buildTerrainMesh(terrain, terrainTexture) : null;
+    if (!terrainMesh) continue;
+    terrainMeshes++;
+    l2Group.add(terrainMesh);
+  }
+  if (terrains.length) log(`[terrain] ${terrainMeshes}/${terrains.length} heightmaps meshed`);
 
   // group placements by package, then by mesh
   const byPkg = new Map<string, MapPlacement[]>();
