@@ -6,6 +6,7 @@ import { L2Package } from "@/lib/l2-package";
 import { loadMap } from "@/lib/map-loader";
 import { getGameConnection, type GameEvent, type WorldEntity } from "@/lib/l2-protocol/game-client";
 import { setSelectedTarget } from "@/lib/game-state";
+import { loadCharacterModel, type CharacterModelHandle } from "@/lib/character-mesh";
 
 /**
  * Phase 1.5 viewport.
@@ -98,7 +99,8 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     const toScene = (wx: number, wy: number, wz: number) =>
       new THREE.Vector3((wx - origin.x) / SCALE, (wz - origin.z) / SCALE, (wy - origin.y) / SCALE);
 
-    // Player marker
+    // Player marker — a teal cone shown immediately, then replaced by the real
+    // 3D character model once it loads (Phase: player avatar in-world).
     const playerMesh = new THREE.Mesh(
       new THREE.ConeGeometry(1.1, 3.4, 8),
       new THREE.MeshStandardMaterial({ color: 0x3fb6a8, emissive: 0x16403a, roughness: 0.4 }),
@@ -106,6 +108,31 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     playerMesh.position.set(0, 1.7, 0);
     playerMesh.castShadow = true;
     scene.add(playerMesh);
+
+    // Swap the cone for the player's real character model.
+    let playerModel: CharacterModelHandle | null = null;
+    let playerModelDisposed = false;
+    (() => {
+      let race = "Human";
+      let gender: "F" | "M" = "F";
+      try {
+        const raw = sessionStorage.getItem("l2.activeChar");
+        if (raw) {
+          const c = JSON.parse(raw);
+          if (c.race) race = c.race;
+          if (c.gender === "M" || c.sex === 0 || c.sex === "0") gender = "M";
+        }
+      } catch { /* ignore */ }
+      loadCharacterModel(race, gender, { targetHeight: 3.4 })
+        .then((handle) => {
+          if (!handle || playerModelDisposed) { handle?.dispose(); return; }
+          playerModel = handle;
+          handle.group.position.set(0, 0, 0);
+          scene.add(handle.group);
+          scene.remove(playerMesh); // hide the placeholder cone
+        })
+        .catch(() => {/* keep cone */});
+    })();
 
     const playerRing = new THREE.Mesh(
       new THREE.RingGeometry(2.2, 2.6, 32),
@@ -408,6 +435,8 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       renderer.domElement.removeEventListener("wheel", onWheel);
       entityMeshes.forEach((m) => scene.remove(m));
       entityMeshes.clear();
+      playerModelDisposed = true;
+      if (playerModel) { scene.remove(playerModel.group); playerModel.dispose(); }
       if (mapGroup) scene.remove(mapGroup);
       mapDisposables.forEach((d) => d.dispose());
       mount.removeChild(renderer.domElement);
