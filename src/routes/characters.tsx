@@ -169,16 +169,21 @@ function Characters() {
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 w-[320px]">
           <div className="text-center mb-1">
             <div className="text-gold text-sm font-display tracking-widest">{sel.name}</div>
-            <div className="text-[10px] text-muted-foreground">Lv.{sel.level} {sel.klass}</div>
+            <div className="text-[10px] text-muted-foreground">Lv.{sel.level} {sel.klass} · {sel.race}</div>
           </div>
           <div className="l2-frame rounded px-3 py-2 space-y-1 text-[9px] font-mono">
-            <StatRow label="HP" value="—" pct={1} color="oklch(0.55 0.22 25)" />
-            <StatRow label="MP" value="—" pct={1} color="oklch(0.55 0.18 250)" />
+            <StatRow label="HP" value={`${sel.hp | 0} / ${sel.hp | 0}`} pct={1} color="oklch(0.55 0.22 25)" />
+            <StatRow label="MP" value={`${sel.mp | 0} / ${sel.mp | 0}`} pct={1} color="oklch(0.55 0.18 250)" />
             <StatRow label="VP" value="" pct={0} color="oklch(0.6 0.18 30)" />
-            <StatRow label="XP" value={`Lv.${sel.level}`} pct={0.83} color="oklch(0.55 0.04 70)" />
+            <StatRow
+              label="XP"
+              value={`${(sel.expPercent ?? 0).toFixed(4)}%`}
+              pct={(sel.expPercent ?? 0) / 100}
+              color="oklch(0.55 0.04 70)"
+            />
             <div className="flex items-center justify-between pt-0.5">
               <span className="text-muted-foreground w-7">SP</span>
-              <span className="flex-1 text-foreground/80 px-2">{sel.race}</span>
+              <span className="flex-1 text-foreground/80 px-2">{(sel.sp ?? 0).toLocaleString()}</span>
               <span className="text-muted-foreground">Rep. <span className="text-foreground/80">0</span></span>
             </div>
           </div>

@@ -1,97 +1,42 @@
-# Phase 2 — Mobile HUD action wiring
+# Apply richer character roster parsing
 
-Συνδέουμε το `MobileGameHud` με το game/network layer και προσθέτουμε tap-to-target / tap-to-move από το 3D canvas. Μόνο frontend + protocol calls, χωρίς αλλαγές σε scene rendering ή desktop HUD.
+## 1. Replace `src/lib/l2-protocol/game-client.ts`
 
-## 1. Game client send methods
+Overwrite with the uploaded version. The only meaningful diff vs current:
 
-Επέκταση `src/lib/l2-protocol/game-client.ts` με public methods:
+- `GameCharacter` gains `hp`, `mp`, `sp`, `expPercent`.
+- `parseCharSelectionInfo` no longer `r.skip(...)`s the stat block — it now reads:
+  - `hp = r.f64()` (current HP, == max at char select)
+  - `mp = r.f64()` (current MP)
+  - `sp = Number(r.u64())`
+  - skips absolute exp (`r.u64()`)
+  - `expPct = r.f64()` → stored as `expPercent = expPct * 100`
+  - then `level = r.u32()`
+- Everything else (world entity layer, opcodes, encryption, EnterWorld, NpcInfo/Move/Delete parsing, action senders) stays byte-identical.
 
-- `sendMoveTo(x: number, y: number, z: number)` — MoveBackwardToLocation (0x01)
-- `sendAttack(objectId: number)` — Attack (0x01? ή ανάλογα build) με origin x/y/z + shift flag
-- `sendAction(objectId: number, shift?: boolean)` — Action (0x04) για target / interact / talk to NPC
-- `sendSay(text: string, channel?: number)` — Say2 (0x49) με default channel ALL=0
+No other files in `src/lib/l2-protocol/` are touched.
 
-Κάθε method:
-- noop αν `!this.connected`
-- φτιάχνει το packet bytes με τα ήδη υπάρχοντα helpers του project (writer/encryption pipeline που χρησιμοποιείται για AuthLogin κλπ)
-- περνά από το ίδιο encrypt+send path
+## 2. Wire real stats into `src/routes/characters.tsx`
 
-Δεν αλλάζουμε υπάρχουσες handlers ή event types.
+In the center-bottom stats panel (currently shows `"—"` placeholders), use the new fields on `sel`:
 
-## 2. Selected target state
+- HP row: `value="{hp} / {hp}"`, `pct={1}` (full at char-select).
+- MP row: `value="{mp} / {mp}"`, `pct={1}`.
+- VP row: leave as-is (no data yet).
+- XP row: `value="{expPercent.toFixed(4)}%"`, `pct={expPercent/100}`.
+- SP row (the bottom flex line): replace the `race` text in the middle with `SP {sp.toLocaleString()}`, keep `Rep. 0` on the right, and move race into the small header line under the name (`Lv.X {klass} · {race}`).
 
-Νέο lightweight store `src/lib/game-state.ts` (Zustand-free, plain module + listeners ή ένα μικρό `useSyncExternalStore` hook):
+Values are rounded with `| 0` for HP/MP so we don't show floats like `2122.0`.
 
-- `selectedTargetId: number | null`
-- `setSelectedTarget(id, meta?)`
-- `useSelectedTarget()` hook
+No styling, layout, or other UI changes. Sessions that already cached an older roster in `sessionStorage` will show `NaN`/`undefined` until next login — acceptable (next login re-parses with the new shape).
 
-Έτσι το `MobileGameHud` και το `WorldViewport` μοιράζονται target χωρίς prop drilling μέσα από το `world.tsx`.
+## 3. Out of scope
 
-## 3. Tap-to-target / tap-to-move στο WorldViewport
+- No `UserInfo (0x32)` parsing yet (would give live current/max separately in-world).
+- No textures / map-loader / xdat work — separate threads.
+- No changes to `world.tsx`, viewport, HUD, or PWA files.
 
-Στο `src/components/WorldViewport.tsx`:
+## Technical notes
 
-- Προσθήκη `onPointerDown` listener στο canvas:
-  - raycast στους loaded actor meshes (έχουν ήδη userData με objectId αν είναι entity)
-  - αν hit entity → `setSelectedTarget(objectId)` + `props.onTargetTap?.(id)`
-  - αν hit ground → υπολόγισε world (x,y,z) → `props.onGroundTap?.(x,y,z)`
-- Mobile-only: long-press (>250ms) στο ίδιο σημείο = move command (αντί για απλό tap). Για τώρα: απλό tap = target/move ανάλογα με hit.
-- Camera touch controls μένουν ως έχουν.
-
-Props (όλα optional, ώστε desktop usage να μην σπάει):
-```ts
-interface WorldViewportProps {
-  onTargetTap?: (objectId: number) => void;
-  onGroundTap?: (x: number, y: number, z: number) => void;
-}
-```
-
-## 4. Wire-up στο world.tsx
-
-```tsx
-<WorldViewport
-  onTargetTap={(id) => getGameConnection()?.sendAction(id)}
-  onGroundTap={(x,y,z) => getGameConnection()?.sendMoveTo(x,y,z)}
-/>
-...
-<MobileGameHud
-  targetId={selectedTargetId}
-  onAttack={() => { const id = getSelectedTarget(); if (id) getGameConnection()?.sendAttack(id); }}
-  onInteract={() => { const id = getSelectedTarget(); if (id) getGameConnection()?.sendAction(id); }}
-  onMove={(dx,dy) => { /* joystick → continuous move, see §5 */ }}
-  onSay={(t) => getGameConnection()?.sendSay(t)}
-/>
-```
-
-## 5. Joystick → movement
-
-Joystick επιστρέφει normalized `dx,dy ∈ [-1,1]`. Στρατηγική:
-- Όσο `|dx|+|dy| > 0.15`: κάθε ~300ms στέλνουμε `sendMoveTo(playerX + dx*R, playerY + dy*R, playerZ)` με `R ≈ 800` (L2 units). Στο release στέλνουμε ένα stop move (move-to current position).
-- Throttling με `setInterval` που ζει όσο το joystick είναι active.
-
-Player position: παίρνεται από το game-state (θα προστεθεί `selfPosition` που ενημερώνεται από world packets — αν δεν υπάρχει ακόμα, fallback σε (0,0,0) και TODO).
-
-## 6. Target panel binding
-
-Στο `MobileGameHud` το "No target" αντικαθίσταται με `targetId ? "Target #" + targetId : "No target"` (HP bar μένει placeholder 100% μέχρι να έρθουν stats από StatusUpdate packet — out of scope τώρα).
-
-## Out of scope
-
-- Real HP/MP/CP από character status packets (χωριστό loop).
-- Skill cooldowns, skill packets (RequestMagicSkillUse).
-- Inventory / item use packets.
-- Pathfinding — βασιζόμαστε στο server-side movement validation.
-- Καμία αλλαγή σε desktop HUD ή scene rendering.
-
-## Files
-
-**New**: `src/lib/game-state.ts`
-
-**Edited**:
-- `src/lib/l2-protocol/game-client.ts` (4 νέες send methods)
-- `src/components/WorldViewport.tsx` (raycast + tap props)
-- `src/components/mobile/MobileGameHud.tsx` (target binding, joystick throttle)
-- `src/routes/world.tsx` (wire callbacks)
-
-Πάμε;
+- `PacketReader.f64()` / `u64()` already exist in `packets.ts` (used elsewhere in `parseCharSelected`), so no new reader methods are needed.
+- `CHAR_TAIL_AFTER_LEVEL = 495` is unchanged — the bytes we now actively read were previously inside the skipped region between `serverId` and `level`, so the per-character footprint and tail offset stay correct.
