@@ -60,19 +60,36 @@ export function L2LoginScreen({
       style={{
         position: "fixed",
         inset: 0,
-        background: `#000 url(${BG}) center/cover no-repeat`,
+        background: "#000",
         fontFamily: "Tahoma, Geneva, sans-serif",
         overflow: "hidden",
       }}
     >
+      <video
+        src="/hud/videos/login_web.mp4"
+        autoPlay
+        muted
+        loop
+        playsInline
+        poster={BG}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          pointerEvents: "none",
+        }}
+      />
       <div
         style={{
           position: "absolute",
           inset: 0,
           background:
-            "radial-gradient(circle at center, transparent 0%, transparent 54%, rgba(0,0,0,0.3) 100%)",
+            "radial-gradient(circle at center, transparent 0%, transparent 54%, rgba(0,0,0,0.45) 100%)",
         }}
       />
+
 
       <div
         style={{
