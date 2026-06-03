@@ -256,7 +256,10 @@ function Launcher() {
                           fontWeight: active ? 700 : 400,
                         }}
                       >
-                        {`L2-${s.ip}:${s.port}`}
+                        <span>L2-Slave</span>
+                        <span style={{ marginLeft: 12, color: "#9ed897" }}>
+                          {["Down", "Light", "Normal", "Heavy", "Full"][s.status] ?? ""}
+                        </span>
                       </button>
                     );
                   })
