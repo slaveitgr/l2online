@@ -1,0 +1,12 @@
+{
+  "name": "L2 Online",
+  "short_name": "L2 Online",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#080604",
+  "theme_color": "#0A0F1E",
+  "icons": [
+    { "src": "/favicon.ico", "sizes": "any", "type": "image/x-icon" }
+  ]
+}
