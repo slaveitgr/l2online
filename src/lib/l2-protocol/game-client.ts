@@ -22,6 +22,10 @@ export interface GameCharacter {
   klass: string;
   race: string;
   level: number;
+  hp: number; // current HP (= max at char select)
+  mp: number; // current MP
+  sp: number; // skill points
+  expPercent: number; // 0..100 within current level
   color: string;
 }
 
@@ -129,7 +133,8 @@ export class L2GameClient {
   start(): Promise<GameEvent> {
     return new Promise((resolve) => {
       this.resolve = resolve;
-      const proto = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
+      const proto =
+        typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
       const base = this.opts.bridgeUrl ?? `${proto}//${window.location.host}/api/l2-bridge`;
       const url = `${base}?host=${encodeURIComponent(this.opts.host)}&port=${this.opts.port}`;
       this.emit({ type: "status", message: `[GS] connecting bridge ${url}` });
@@ -138,7 +143,8 @@ export class L2GameClient {
       this.ws = ws;
       ws.onopen = () => this.emit({ type: "status", message: "[GS] WebSocket open" });
       ws.onclose = (ev) => {
-        if (!this.resolved) this.finish({ type: "closed" }, `[GS] closed code=${ev.code} reason=${ev.reason}`);
+        if (!this.resolved)
+          this.finish({ type: "closed" }, `[GS] closed code=${ev.code} reason=${ev.reason}`);
         else this.emit({ type: "closed" });
       };
       ws.onerror = () => {
@@ -307,7 +313,9 @@ export class L2GameClient {
         seedOffset = 2;
       }
       if (result !== 1) {
-        throw new Error(`server rejected protocol ${this.opts.protocolRevision} (result=${result}); expected 502`);
+        throw new Error(
+          `server rejected protocol ${this.opts.protocolRevision} (result=${result}); expected 502`
+        );
       }
       if (body.length < seedOffset + 8) throw new Error(`KeyPacket too short: ${body.length}B`);
 
@@ -316,7 +324,11 @@ export class L2GameClient {
       let useEncryption = false;
       if (body.length >= encOff + 4) {
         const flag =
-          (body[encOff] | (body[encOff + 1] << 8) | (body[encOff + 2] << 16) | (body[encOff + 3] << 24)) >>> 0;
+          (body[encOff] |
+            (body[encOff + 1] << 8) |
+            (body[encOff + 2] << 16) |
+            (body[encOff + 3] << 24)) >>>
+          0;
         useEncryption = flag !== 0;
       }
 
@@ -401,58 +413,6 @@ export class L2GameClient {
     this.sendFrame(body, this.useEncryption);
   }
 
-  // ===== Public action senders (mobile HUD / future desktop input) =====
-  // Opcodes follow the common L2J Interlude-ish convention. On builds with
-  // shuffled client opcodes, adjust the first u8 — packet bodies stay the same.
-
-  /** RequestMoveBackwardToLocation (0x01): destination + origin in L2 world coords. */
-  sendMoveTo(x: number, y: number, z: number) {
-    if (!this.connected) return;
-    const p = this._player;
-    const ox = p?.x ?? x;
-    const oy = p?.y ?? y;
-    const oz = p?.z ?? z;
-    const body = new PacketWriter()
-      .u8(0x01)
-      .u32(x | 0).u32(y | 0).u32(z | 0)
-      .u32(ox | 0).u32(oy | 0).u32(oz | 0)
-      .u32(0)
-      .build();
-    this.sendFrame(body, this.useEncryption);
-  }
-
-  /** RequestAction (0x04): click-to-target / talk-to-NPC / interact. */
-  sendAction(objectId: number, shift = false) {
-    if (!this.connected) return;
-    const p = this._player;
-    const body = new PacketWriter()
-      .u8(0x04)
-      .u32(objectId)
-      .u32((p?.x ?? 0) | 0)
-      .u32((p?.y ?? 0) | 0)
-      .u32((p?.z ?? 0) | 0)
-      .u8(shift ? 1 : 0)
-      .build();
-    this.sendFrame(body, this.useEncryption);
-  }
-
-  /** RequestAttack — modelled as forced Action (shift=true). */
-  sendAttack(objectId: number) {
-    this.sendAction(objectId, true);
-  }
-
-  /** Say2 (0x49): channel 0 = ALL. */
-  sendSay(text: string, channel = 0) {
-    if (!this.connected || !text) return;
-    const body = new PacketWriter()
-      .u8(0x49)
-      .str(text)
-      .u32(channel)
-      .str("")
-      .build();
-    this.sendFrame(body, this.useEncryption);
-  }
-
   // ===== Parsing: roster =====
 
   private parseCharSelectionInfo(body: Uint8Array) {
@@ -477,13 +437,13 @@ export class L2GameClient {
         r.u32();
         const race = r.u32();
         const baseClass = r.u32();
-        r.u32();
-        r.skip(12);
-        r.skip(8);
-        r.skip(8);
-        r.skip(8);
-        r.skip(8);
-        r.skip(8);
+        r.u32();           // serverId
+        r.skip(12);        // x, y, z
+        const hp = r.f64(); // currentHp (== maxHp at char select)
+        const mp = r.f64(); // currentMp
+        const sp = Number(r.u64());
+        r.u64();           // exp (absolute)
+        const expPct = r.f64(); // 0..1 within level
         const level = r.u32();
 
         chars.push({
@@ -492,6 +452,8 @@ export class L2GameClient {
           klass: classNameOf(baseClass),
           race: raceNameOf(race),
           level,
+          hp, mp, sp,
+          expPercent: expPct * 100,
           color: colorFromName(name),
         });
 
