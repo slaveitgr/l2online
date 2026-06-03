@@ -168,49 +168,70 @@ function Launcher() {
       {phase === "login" ? (
         <L2LoginScreen onLogin={doLogin} busy={busy} error={error} statusLog={statusLog} />
       ) : (
-        <div style={{ position: "fixed", inset: 0, background: "#000", overflow: "hidden" }}>
+        <L2LauncherShell>
           <div
             style={{
               position: "absolute",
               left: "50%",
-              top: "50%",
+              top: "62%",
               transform: "translate(-50%, -50%)",
-              width: "min(100vw, 177.778vh)",
-              height: "min(100vh, 56.25vw)",
-              background: `url(${serverSelect.url}) center/contain no-repeat`,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 12,
+              pointerEvents: "auto",
             }}
           >
+            {/* Server selection bar (faithful to client screenshot) */}
             <div
               style={{
-                position: "absolute",
-                left: "50%",
-                top: "50%",
-                transform: "translate(-50%, -50%)",
-                width: "min(440px, 70%)",
-                padding: "22px 26px",
-                background: "linear-gradient(to bottom, rgba(28,24,16,0.96), rgba(10,8,6,0.96))",
-                border: "1px solid rgba(204,180,120,0.55)",
-                borderRadius: 4,
-                boxShadow: "0 10px 30px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,235,180,0.15)",
-                color: "#e6dcb6",
+                display: "flex",
+                alignItems: "stretch",
+                background:
+                  "linear-gradient(180deg,#1c2240 0%,#0a0d22 55%,#1c2240 100%)",
+                border: "1px solid #6a5630",
+                boxShadow:
+                  "inset 0 1px 0 rgba(255,235,180,0.08), 0 4px 10px rgba(0,0,0,0.7)",
                 fontFamily: "Arial, Helvetica, sans-serif",
+                fontSize: 12,
+                color: "#cfc6a4",
+                height: 30,
+                overflow: "hidden",
               }}
             >
               <div
                 style={{
-                  fontSize: 16,
-                  letterSpacing: 2,
-                  textAlign: "center",
-                  marginBottom: 14,
+                  padding: "0 16px",
+                  display: "flex",
+                  alignItems: "center",
+                  background:
+                    "linear-gradient(180deg,#3b4a8a 0%,#1e2657 100%)",
+                  borderRight: "1px solid #6a5630",
+                  color: "#e6dcb6",
                   textShadow: "0 1px 2px #000",
-                  color: "#f0e3b3",
+                  letterSpacing: 0.5,
                 }}
               >
-                SERVER SELECTION
+                Server
               </div>
-              <div style={{ maxHeight: 220, overflowY: "auto", marginBottom: 14 }}>
+              <div
+                style={{
+                  display: "flex",
+                  maxWidth: 520,
+                  overflowX: "auto",
+                }}
+              >
                 {servers.length === 0 ? (
-                  <div style={{ textAlign: "center", opacity: 0.7, padding: 12 }}>No servers</div>
+                  <div
+                    style={{
+                      padding: "0 18px",
+                      display: "flex",
+                      alignItems: "center",
+                      opacity: 0.7,
+                    }}
+                  >
+                    No servers
+                  </div>
                 ) : (
                   servers.map((s) => {
                     const active = s.id === selectedServer;
@@ -221,84 +242,81 @@ function Launcher() {
                         onClick={() => setSelectedServer(s.id)}
                         onDoubleClick={onEnterWorld}
                         style={{
-                          display: "block",
-                          width: "100%",
-                          textAlign: "left",
-                          padding: "8px 12px",
-                          marginBottom: 4,
+                          padding: "0 18px",
                           background: active
-                            ? "linear-gradient(to bottom, rgba(120,96,52,0.85), rgba(60,46,24,0.85))"
-                            : "rgba(255,255,255,0.04)",
-                          border: `1px solid ${active ? "rgba(230,210,140,0.8)" : "rgba(150,130,90,0.35)"}`,
-                          borderRadius: 3,
-                          color: active ? "#fff8d8" : "#d8cea8",
-                          fontSize: 13,
+                            ? "linear-gradient(180deg,#4a5a9c 0%,#222a5c 100%)"
+                            : "transparent",
+                          border: 0,
+                          borderRight: "1px solid rgba(106,86,48,0.5)",
+                          color: active ? "#fff" : "#cfc6a4",
+                          fontSize: 12,
                           cursor: "pointer",
+                          textShadow: "0 1px 2px #000",
+                          whiteSpace: "nowrap",
+                          fontWeight: active ? 700 : 400,
                         }}
                       >
-                        <span style={{ opacity: 0.7 }}>#{s.id}</span>{" "}
-                        <span>
-                          {s.ip}:{s.port}
-                        </span>
+                        {s.name || `Server #${s.id}`}
                       </button>
                     );
                   })
                 )}
               </div>
-              <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-                <button
-                  type="button"
-                  onClick={onEnterWorld}
-                  disabled={busy || selectedServer == null}
-                  style={{
-                    padding: "8px 22px",
-                    background: "linear-gradient(to bottom, rgba(107,98,74,0.94), rgba(43,39,30,0.98))",
-                    border: "1px solid rgba(230,215,156,0.7)",
-                    borderRadius: 3,
-                    color: "#fff",
-                    cursor: busy || selectedServer == null ? "default" : "pointer",
-                    opacity: busy || selectedServer == null ? 0.5 : 1,
-                    fontSize: 13,
-                    textShadow: "0 1px 2px #000",
-                  }}
-                >
-                  {busy ? "…" : "OK"}
-                </button>
-                <button
-                  type="button"
-                  onClick={cancelServerSelect}
-                  disabled={busy}
-                  style={{
-                    padding: "8px 22px",
-                    background: "linear-gradient(to bottom, rgba(80,72,52,0.9), rgba(30,26,20,0.96))",
-                    border: "1px solid rgba(180,160,110,0.55)",
-                    borderRadius: 3,
-                    color: "#e4dcc2",
-                    cursor: "pointer",
-                    fontSize: 13,
-                    textShadow: "0 1px 2px #000",
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-              {error ? (
-                <div
-                  style={{
-                    marginTop: 12,
-                    color: "#ff8c8c",
-                    fontSize: 12,
-                    textAlign: "center",
-                    textShadow: "0 1px 2px #000",
-                  }}
-                >
-                  {error}
-                </div>
-              ) : null}
             </div>
+
+            <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
+              <button
+                type="button"
+                onClick={onEnterWorld}
+                disabled={busy || selectedServer == null}
+                style={dialogBtn(busy || selectedServer == null)}
+              >
+                {busy ? "…" : "OK"}
+              </button>
+              <button
+                type="button"
+                onClick={cancelServerSelect}
+                disabled={busy}
+                style={dialogBtn(false)}
+              >
+                Cancel
+              </button>
+            </div>
+
+            {error ? (
+              <div
+                style={{
+                  marginTop: 8,
+                  color: "#ff8c8c",
+                  fontSize: 12,
+                  textAlign: "center",
+                  textShadow: "0 1px 2px #000",
+                  maxWidth: 480,
+                }}
+              >
+                {error}
+              </div>
+            ) : null}
           </div>
-        </div>
+        </L2LauncherShell>
       )}
     </SpriteProvider>
   );
 }
+
+function dialogBtn(disabled: boolean): React.CSSProperties {
+  return {
+    width: 92,
+    height: 26,
+    background: "linear-gradient(180deg,#3a3424 0%,#1f1a10 55%,#2a2418 100%)",
+    border: "1px solid #6a5630",
+    boxShadow: "inset 0 1px 0 rgba(255,235,180,0.10), 0 2px 4px rgba(0,0,0,0.7)",
+    color: disabled ? "#7a7058" : "#e6dcb6",
+    fontFamily: "Arial, Helvetica, sans-serif",
+    fontSize: 12,
+    letterSpacing: 0.5,
+    textShadow: "0 1px 2px #000, 0 0 4px #000",
+    cursor: disabled ? "default" : "pointer",
+  };
+}
+
