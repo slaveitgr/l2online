@@ -241,22 +241,24 @@ export function WorldViewport() {
       else if (maps.length > 0) setLoadStatus(`Found ${maps.length} maps · loading sector…`);
       else { setLoadStatus("No cached assets. Visit /cdn-cache to stream from CDN."); return; }
 
-      // Try preferred Talking Island sector first, then any cached map.
-      const candidates = ["maps/17_25.unr", ...maps.map((m) => m.path)];
+      // Try preferred sectors first, then any cached map. Mount → cache fallback.
+      const candidates = ["Maps/22_22.unr", "maps/22_22.unr", "Maps/17_25.unr", "maps/17_25.unr", ...maps.map((m) => m.path)];
       let pkg: L2Package | null = null;
       let pickedPath = "";
+      let unrBytes: Uint8Array | null = null;
       for (const path of candidates) {
         try {
-          const bytes = (await getFile(path)) ?? (await readFromMount(path));
+          const bytes = (await readFromMount(path)) ?? (await getFile(path));
           if (!bytes) continue;
-          pkg = L2Package.from(bytes.buffer as ArrayBuffer);
+          pkg = L2Package.from(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
           pickedPath = path;
+          unrBytes = bytes;
           break;
         } catch (err) {
           console.warn("[map] failed to parse", path, err);
         }
       }
-      if (!pkg) { setLoadStatus("No parsable .unr in cache."); return; }
+      if (!pkg || !unrBytes) { setLoadStatus("No parsable .unr available (mount or cache)."); return; }
 
       const actors = pkg.readActorPlacements();
       const spawns = pkg.readActorPlacements(["PlayerStart"]);
@@ -266,11 +268,10 @@ export function WorldViewport() {
 
       if (actors.length === 0) return;
 
-      // Phase 3: assemble REAL meshes from .usx packages.
-      // Pull each StaticMeshActor.StaticMesh ref and resolve to the matching .usx.
+      // Phase 3: assemble REAL meshes from .usx packages — read live from mount first.
       const bytesForPath = async (path: string): Promise<ArrayBuffer | null> => {
         try {
-          const b = (await getFile(path)) ?? (await readFromMount(path));
+          const b = (await readFromMount(path)) ?? (await getFile(path));
           return b ? (b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer) : null;
         } catch {
           return null;
@@ -283,15 +284,24 @@ export function WorldViewport() {
         meshIndex.set(base, f.path);
       }
 
-      const unrBytes = (await getFile(pickedPath)) ?? (await readFromMount(pickedPath));
-      if (!unrBytes) { setLoadStatus("Map file vanished from cache."); return; }
-
       try {
         mapGroup = await loadMap(
           unrBytes.buffer.slice(unrBytes.byteOffset, unrBytes.byteOffset + unrBytes.byteLength) as ArrayBuffer,
           async (pkgName) => {
-            const path = meshIndex.get(pkgName.toLowerCase()) ?? `staticmeshes/${pkgName}.usx`;
-            return await bytesForPath(path);
+            // Try mount → cache, across StaticMeshes/.usx, Textures/.utx, SysTextures/.utx.
+            for (const p of [
+              `StaticMeshes/${pkgName}.usx`,
+              `staticmeshes/${pkgName}.usx`,
+              `Textures/${pkgName}.utx`,
+              `textures/${pkgName}.utx`,
+              `SysTextures/${pkgName}.utx`,
+              `systextures/${pkgName}.utx`,
+            ]) {
+              const buf = await bytesForPath(p);
+              if (buf) return buf;
+            }
+            const indexed = meshIndex.get(pkgName.toLowerCase());
+            return indexed ? await bytesForPath(indexed) : null;
           },
           {
             scale: SCALE,
