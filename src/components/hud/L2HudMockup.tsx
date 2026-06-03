@@ -47,7 +47,184 @@ const MENU_HITS: { open?: string; left: number; top: number; w: number; h: numbe
   { left: 52, top: 377, w: 122, h: 36, title: "Edit" },
 ];
 
-export function L2HudMockup({ onExit }: { onExit?: () => void }) {
+export interface HudActiveChar {
+  name: string;
+  level: number;
+  klass?: string;
+  race?: string;
+  hp?: number;
+  hpMax?: number;
+  mp?: number;
+  mpMax?: number;
+  cp?: number;
+  cpMax?: number;
+  expPct?: number;
+}
+
+export interface HudChatLine {
+  color?: string;
+  text: string;
+}
+
+function StatusBox({ char }: { char: HudActiveChar }) {
+  const pct = (v?: number, m?: number) =>
+    !v || !m ? 0 : Math.max(0, Math.min(1, v / m));
+  const bar = (
+    color: string,
+    value: number,
+    label: string,
+    cur?: number,
+    max?: number,
+  ) => (
+    <div
+      style={{
+        position: "relative",
+        height: 16,
+        background: "#0a0907",
+        border: "1px solid #2a241a",
+        marginBottom: 2,
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: `${value * 100}%`,
+          background: color,
+          transition: "width 200ms",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 6px",
+          fontSize: 11,
+          color: "#e6dcc0",
+          textShadow: "0 1px 1px #000",
+          lineHeight: "16px",
+        }}
+      >
+        <span>{label}</span>
+        <span>
+          {cur ?? 0} / {max ?? 0}
+        </span>
+      </div>
+    </div>
+  );
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 10,
+        top: 8,
+        width: 230,
+        padding: "6px 8px 8px",
+        background: "rgba(8,8,6,0.55)",
+        border: "1px solid #4a3f28",
+        color: "#e6dcc0",
+        fontFamily: "Tahoma, Geneva, sans-serif",
+        fontSize: 12,
+        textShadow: "0 1px 1px #000",
+        zIndex: 5,
+        pointerEvents: "none",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 4 }}>
+        <span style={{ color: "#c9a04a", fontWeight: 700 }}>{char.level}</span>
+        <span style={{ fontWeight: 700 }}>{char.name}</span>
+        {char.klass ? (
+          <span style={{ marginLeft: "auto", color: "#9c906f", fontSize: 11 }}>
+            {char.klass}
+          </span>
+        ) : null}
+      </div>
+      {bar(
+        "linear-gradient(180deg,#d8c25a,#7a6420)",
+        pct(char.cp, char.cpMax),
+        "CP",
+        char.cp,
+        char.cpMax,
+      )}
+      {bar(
+        "linear-gradient(180deg,#c8392f,#5e1612)",
+        pct(char.hp, char.hpMax),
+        "HP",
+        char.hp,
+        char.hpMax,
+      )}
+      {bar(
+        "linear-gradient(180deg,#2f6cc8,#0f2a5e)",
+        pct(char.mp, char.mpMax),
+        "MP",
+        char.mp,
+        char.mpMax,
+      )}
+      {char.expPct != null ? (
+        <div
+          style={{
+            marginTop: 4,
+            height: 4,
+            background: "#0a0907",
+            border: "1px solid #2a241a",
+          }}
+        >
+          <div
+            style={{
+              width: `${Math.max(0, Math.min(100, char.expPct))}%`,
+              height: "100%",
+              background: "linear-gradient(180deg,#c9a04a,#5e4612)",
+            }}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ChatLog({ lines }: { lines: HudChatLine[] }) {
+  if (lines.length === 0) return null;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 14,
+        top: 686,
+        width: 372,
+        height: 250,
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "flex-end",
+        gap: 2,
+        fontFamily: "Tahoma, Geneva, sans-serif",
+        fontSize: 12,
+        textShadow: "0 1px 1px #000",
+        zIndex: 5,
+        pointerEvents: "none",
+      }}
+    >
+      {lines.slice(-12).map((l, i) => (
+        <div key={i} style={{ color: l.color ?? "#d8d2bd" }}>
+          {l.text}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function L2HudMockup({
+  onExit,
+  activeChar,
+  chatLines = [],
+}: {
+  onExit?: () => void;
+  activeChar?: HudActiveChar;
+  chatLines?: HudChatLine[];
+}) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [order, setOrder] = useState<string[]>([]);
   const [pos, setPos] = useState<Record<string, { x: number; y: number }>>({});
@@ -146,6 +323,11 @@ export function L2HudMockup({ onExit }: { onExit?: () => void }) {
           alt=""
           style={{ position: "absolute", inset: 0, width: 1920, height: 1080, pointerEvents: "none" }}
         />
+
+        {activeChar ? <StatusBox char={activeChar} /> : null}
+        <ChatLog lines={chatLines} />
+
+
 
         {HOTSPOTS.map((h) => (
           <button
