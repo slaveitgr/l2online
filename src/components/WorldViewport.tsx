@@ -5,6 +5,7 @@ import { listMountFiles, readFromMount } from "@/lib/local-mount";
 import { L2Package } from "@/lib/l2-package";
 import { loadMap } from "@/lib/map-loader";
 import { getGameConnection, type GameEvent, type WorldEntity } from "@/lib/l2-protocol/game-client";
+import { setSelectedTarget } from "@/lib/game-state";
 
 /**
  * Phase 1.5 viewport.
@@ -176,10 +177,19 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     };
     updateCamera();
 
+    const raycaster = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    let downX = 0;
+    let downY = 0;
+    let downT = 0;
+
     const onDown = (e: PointerEvent) => {
       dragging = true;
       lastX = e.clientX;
       lastY = e.clientY;
+      downX = e.clientX;
+      downY = e.clientY;
+      downT = performance.now();
       renderer.domElement.setPointerCapture(e.pointerId);
     };
     const onMove = (e: PointerEvent) => {
@@ -193,6 +203,34 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     const onUp = (e: PointerEvent) => {
       dragging = false;
       renderer.domElement.releasePointerCapture(e.pointerId);
+      const dx = e.clientX - downX;
+      const dy = e.clientY - downY;
+      const moved = Math.hypot(dx, dy);
+      const dt = performance.now() - downT;
+      if (moved < 6 && dt < 350) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(ndc, camera);
+        const npcHits = raycaster.intersectObjects(Array.from(entityMeshes.values()), false);
+        if (npcHits.length > 0) {
+          const id = npcHits[0].object.userData.objectId as number | undefined;
+          if (typeof id === "number") {
+            setSelectedTarget(id);
+            onTargetTap?.(id);
+            return;
+          }
+        }
+        const groundHits = raycaster.intersectObject(terrain, false);
+        if (groundHits.length > 0 && onGroundTap) {
+          const p = groundHits[0].point;
+          // scene → L2 world (inverse of toScene)
+          const wx = Math.round(p.x * SCALE + origin.x);
+          const wy = Math.round(p.z * SCALE + origin.y);
+          const wz = Math.round(p.y * SCALE + origin.z);
+          onGroundTap(wx, wy, wz);
+        }
+      }
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
