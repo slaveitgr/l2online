@@ -1,287 +1,301 @@
 # L2 Online
 
-**L2 Online** είναι ένα πειραματικό browser-based Lineage II web client / launcher, φτιαγμένο με **TanStack Start**, **React**, **TypeScript**, **Three.js** και WebSocket-to-TCP bridge για επικοινωνία με Lineage II login/game server.
+**L2 Online** είναι ένα πειραματικό **browser-based Lineage II web client**. Δεν είναι απλό site και δεν είναι μόνο launcher. Είναι προσπάθεια να τρέξει σταδιακά ένα Lineage II client flow μέσα από browser, με πραγματικό login/game protocol, live world state, asset parsing και WebGL rendering.
 
-Το project έχει στόχο να δοκιμάσει κατά πόσο μπορεί ένα Lineage II client flow να τρέξει μέσα από browser: από login, server list και character selection, μέχρι μελλοντικό WebGL rendering πραγματικών assets του client.
+Στόχος του project είναι ένας web/mobile-first L2 client που μπορεί να δουλέψει σε desktop browser, PWA και μελλοντικά Android, χωρίς Windows client ή emulator.
 
-> Κατάσταση project: **Alpha / Research Prototype**
+> Status: **Alpha / Research Prototype**
 >
-> Το project δεν είναι ακόμα πλήρως playable client. Αυτή τη στιγμή λειτουργεί ως τεχνικό prototype για protocol login, asset streaming/cache και αρχικό WebGL viewport.
+> Το network foundation και το asset pipeline υπάρχουν ήδη. Το project μπορεί να κάνει login, server selection, game server handshake, character list, character select, EnterWorld και να λαμβάνει live world packets. Το rendering πραγματικών L2 assets έχει ξεκινήσει μέσω `.unr`, `.usx`, `.utx` parsing και Three.js map assembly.
 
 ---
 
-## Τι κάνει μέχρι τώρα
+## Τι έχει υλοποιηθεί
 
-Το project περιλαμβάνει ήδη αρκετά βασικά κομμάτια ενός browser L2 client:
+### Network / Protocol
 
-- Launcher σε browser
-- Σύνδεση προς Lineage II login server
-- WebSocket → TCP bridge
-- Blowfish / RSA login protocol flow
-- GameGuard authentication request
-- LoginOk / LoginFail handling
-- Server list parsing
-- Επιλογή game server
-- PlayOk request
-- Σύνδεση προς game server
-- Game server handshake
-- Character list parsing
-- Character selection screen
-- IndexedDB asset cache
-- CDN asset manifest
-- Local Lineage II folder mount μέσω browser
-- Three.js Phase 1 world viewport
+Υπάρχει υλοποίηση για Lineage II Mobius / Superion style protocol `502`.
+
+```text
+Login Server
+  Init
+  GameGuard
+  RSA Auth
+  LoginOk / LoginFail
+  ServerList
+  RequestServerLogin
+  PlayOk
+
+Game Server
+  ProtocolVersion
+  KeyPacket
+  AuthLogin
+  CharSelectionInfo
+  CharacterSelect
+  CharSelected
+  EnterWorld
+  Live world packet stream
+```
+
+Ο browser μιλάει με Lineage II login/game server μέσω WebSocket-to-TCP bridge, επειδή ο browser δεν μπορεί να ανοίξει raw TCP sockets απευθείας.
+
+### Live world layer
+
+Ο game client κρατάει lightweight world state μετά το EnterWorld.
+
+Υπάρχει ήδη parsing / event layer για:
+
+- `CharSelectionInfo`
+- `CharacterSelect`
+- `CharSelected`
+- `EnterWorld`
+- `NpcInfo`
+- `MoveToLocation`
+- `DeleteObject`
+- player state
+- NPC/world entity map
+- generic world packet stream
+
+Αυτά τροφοδοτούν το `/world` viewport για live NPC markers, player marker, packet counter και HUD shell.
+
+### Asset / package pipeline
+
+Υπάρχει L2 Unreal package reader για πραγματικά client assets.
+
+Υποστηρίζονται ήδη:
+
+- Lineage2 package signature parsing
+- XOR package decryption
+- UE2 header parsing
+- name/import/export tables
+- compact index / compat32 decoding
+- tagged properties
+- object references
+- `StaticMeshActor` placements
+- `Location`, `Rotation`, `DrawScale`, `DrawScale3D`
+- texture metadata
+- DXT / RGBA texture extraction
+- StaticMesh geometry extraction
+
+### Map rendering
+
+Υπάρχει map loader που συναρμολογεί πραγματικά L2 map sectors σε Three.js.
+
+```text
+.unr map
+  ↓
+StaticMeshActor placements
+  ↓
+StaticMesh reference
+  ↓
+.usx mesh package
+  ↓
+StaticMesh geometry
+  ↓
+Material / Texture reference
+  ↓
+.utx texture package
+  ↓
+Three.js InstancedMesh / material / texture
+```
+
+Το `/world` route φορτώνει mounted ή cached client files, ψάχνει για `.unr` map sector, διαβάζει actor placements και καλεί τον map loader για πραγματικά meshes/textures στο scene.
 
 ---
 
 ## Τεχνολογίες
 
-Το project είναι βασισμένο σε μοντέρνο frontend/server runtime stack:
-
-- **TanStack Start**
-- **React 19**
-- **TypeScript**
-- **Vite**
-- **TailwindCSS 4**
-- **Three.js**
-- **IndexedDB**
-- **Cloudflare Workers sockets**
-- **WebSocket bridge**
+- TanStack Start
+- React 19
+- TypeScript
+- Vite
+- TailwindCSS 4
+- Three.js
+- IndexedDB
+- Cloudflare Workers sockets
+- WebSocket-to-TCP bridge
+- File System Access API
 
 ---
 
-## Βασική αρχιτεκτονική
-
-Ο browser δεν μπορεί να ανοίξει απευθείας raw TCP σύνδεση προς Lineage II server.
-
-Για αυτό το project χρησιμοποιεί bridge:
+## Αρχιτεκτονική
 
 ```text
 Browser
-  │
   │ WebSocket
   ▼
 /api/l2-bridge
-  │
   │ raw TCP
   ▼
 Lineage II Login Server / Game Server
 ```
 
-Το bridge επιτρέπει στο frontend να μιλήσει με τον L2 login/game server χωρίς native client.
-
----
-
-## Login flow
-
-Το login flow που υλοποιείται είναι:
+Assets:
 
 ```text
-1. Browser ανοίγει WebSocket προς /api/l2-bridge
-2. Το bridge ανοίγει TCP σύνδεση προς login server
-3. Ο client λαμβάνει Init packet
-4. Γίνεται static Blowfish decrypt
-5. Διαβάζεται RSA modulus και Blowfish session key
-6. Στέλνεται AuthGameGuard
-7. Στέλνεται RequestAuthLogin
-8. Λαμβάνεται LoginOk ή LoginFail
-9. Ζητείται ServerList
-10. Ο χρήστης επιλέγει game server
-11. Στέλνεται RequestServerLogin
-12. Λαμβάνεται PlayOk
-13. Ξεκινά σύνδεση προς game server
+Local mounted L2 folder
+  ή
+CDN manifest / IndexedDB cache
+  ↓
+Asset loader
+  ↓
+L2Package parser
+  ↓
+Map loader
+  ↓
+Three.js scene
 ```
-
----
-
-## Game server flow
-
-Μετά την επιλογή server:
-
-```text
-1. Σύνδεση προς game server μέσω bridge
-2. Αποστολή ProtocolVersion
-3. Λήψη KeyPacket
-4. Ενεργοποίηση GameCrypt
-5. Αποστολή AuthLogin
-6. Ανάγνωση CharSelectionInfo
-7. Εμφάνιση χαρακτήρων στο /characters
-```
-
-Αυτή τη στιγμή το game server κομμάτι στοχεύει κυρίως στο να εμφανίσει σωστά τους χαρακτήρες του account.
-
----
-
-## Asset system
-
-Το project υποστηρίζει δύο τρόπους πρόσβασης σε Lineage II client assets.
-
-### 1. CDN streaming
-
-Τα assets μπορούν να έρθουν από CDN μέσω manifest:
-
-```text
-/cdn-manifest.json
-```
-
-Το manifest περιέχει:
-
-- path αρχείου
-- μέγεθος
-- sha256 hash
-- συνολικό μέγεθος client
-- base CDN URL
-
-Τα αρχεία μπορούν να αποθηκευτούν σε IndexedDB cache, ώστε να μην κατεβαίνουν ξανά συνέχεια.
-
-### 2. Local folder mount
-
-Σε Chrome / Edge μπορεί να γίνει mount τοπικός φάκελος Lineage II client μέσω File System Access API.
-
-Αυτό επιτρέπει στο project να διαβάζει assets κατευθείαν από τον τοπικό δίσκο, χωρίς να τα ανεβάζει και χωρίς να τα αντιγράφει όλα στην IndexedDB.
 
 ---
 
 ## Routes
 
-Βασικά routes του project:
-
 ```text
 /              Launcher / login screen
-/characters    Character selection
-/world         Phase 1 WebGL world viewport
+/characters    Character selection + CharacterSelect flow
+/world         Live world viewport + HUD + map/entity rendering
 /cdn-cache     CDN cache / asset management
+/select-files  Local file/folder selection flow
 /api/l2-bridge WebSocket-to-TCP bridge
 ```
 
 ---
 
-## World viewport
+## Βασικά modules
 
-Το `/world` route χρησιμοποιεί Three.js και εμφανίζει ένα αρχικό placeholder περιβάλλον:
+```text
+src/lib/l2-protocol/
+  login-client.ts       Login server protocol
+  game-client.ts        Game server protocol, character select, EnterWorld, world packets
+  game-crypt.ts         Game server encryption layer
+  blowfish.ts           Login encryption
+  rsa.ts                Login RSA auth block
+  packets.ts            Packet reader/writer helpers
 
-- Terrain
-- Fog
-- Dynamic lighting
-- Orbit camera
-- FPS HUD
-- Asset loader status
+src/lib/
+  l2-package.ts         L2/UE2 package parser, maps, meshes, textures
+  map-loader.ts         Three.js map assembly from .unr/.usx/.utx
+  l2-assets.ts          IndexedDB cache + CDN fetch
+  local-mount.ts        File System Access API local client mount
 
-Το πραγματικό parsing και rendering των Lineage II Unreal assets (`.unr`, `.utx`, `.usx`, `.ukx`) είναι επόμενο στάδιο.
+src/components/
+  WorldViewport.tsx     Three.js scene + live entities + map loader
+  hud/                  L2-style HUD components
+```
 
 ---
 
-## Τρέχουσα κατάσταση
+## Current progress
 
-Το project βρίσκεται σε alpha φάση.
+### Έτοιμο / σε λειτουργία
 
-### Υπάρχει ήδη
+- [x] Browser launcher
+- [x] WebSocket-to-TCP bridge
+- [x] Login server handshake
+- [x] RSA auth / GameGuard flow
+- [x] ServerList parsing
+- [x] PlayOk
+- [x] Game server ProtocolVersion
+- [x] KeyPacket handling
+- [x] AuthLogin
+- [x] CharSelectionInfo parsing
+- [x] Character selection UI
+- [x] CharacterSelect packet
+- [x] CharSelected parsing
+- [x] EnterWorld packet
+- [x] Live world packet stream
+- [x] Player state from CharSelected
+- [x] NPC spawn/move/remove markers
+- [x] IndexedDB asset cache
+- [x] Local L2 folder mount
+- [x] `.unr` map package parsing
+- [x] `.usx` static mesh geometry parsing
+- [x] `.utx` texture parsing
+- [x] Three.js map assembly pipeline
+- [x] L2-style HUD shell
 
-- Browser launcher
-- L2 login protocol client
-- L2 game protocol αρχικό client
-- Character selection
-- Asset cache
-- Local folder mount
-- CDN manifest loader
-- WebGL placeholder world
+### Επόμενα
 
-### Δεν υπάρχει ακόμα πλήρως
-
-- Πραγματικό rendering Lineage II maps
-- Πλήρης Unreal package parser
-- Character model rendering
-- Movement packets
-- Full playable world
-- Inventory / skills / NPC / combat
-- Production-ready account management
+- [ ] Full terrain sector rendering
+- [ ] P8 / palette texture path
+- [ ] Better material graph coverage
+- [ ] Sector-based on-demand loading
+- [ ] Mobile touch HUD / Android UX
+- [ ] NetPing / keep-alive
+- [ ] Click-to-move
+- [ ] Movement packet send/receive
+- [ ] Chat send/receive
+- [ ] Targeting
+- [ ] Basic combat loop
+- [ ] UserInfo masked packet parser
+- [ ] CharInfo parser για άλλους παίκτες
+- [ ] Inventory / skills UI
+- [ ] `.ukx` character models
+- [ ] Skeletal animations
+- [ ] Effects / particles
 
 ---
 
 ## Roadmap
 
-### Phase 1 — Protocol & Launcher
+### Milestone 1 — Live World Viewer
 
-- [x] Browser launcher
-- [x] Login server bridge
-- [x] Login protocol handshake
-- [x] Server list
-- [x] PlayOk
-- [x] Game server initial handshake
-- [x] Character list
-- [x] Character select screen
+Να μπαίνεις στον κόσμο και να βλέπεις πραγματικό map section με live NPC/world markers.
 
-### Phase 2 — Assets
+- EnterWorld
+- world packet stream
+- NPC markers
+- player marker
+- map package loading
+- static mesh loading
+- basic texture loading
+- HUD shell
 
-- [x] CDN manifest
-- [x] IndexedDB cache
-- [x] Local folder mount
-- [ ] CDN proxy finalization
-- [ ] Better cache validation
-- [ ] Asset browser/debug tools
+### Milestone 2 — Minimal Playable Client
 
-### Phase 3 — Unreal package parsing
+Να μπορεί ο χαρακτήρας να κινηθεί και να κάνει βασικές αλληλεπιδράσεις.
 
-- [ ] `.unr` map loading
-- [ ] `.utx` texture parsing
-- [ ] `.usx` static mesh parsing
-- [ ] `.ukx` animation/model parsing
-- [ ] Material translation to Three.js
+- keep-alive
+- click-to-move
+- movement packets
+- chat
+- targeting
+- basic attack
+- live HP/MP updates
 
-### Phase 4 — Real world rendering
+### Milestone 3 — Mobile Web Client
 
-- [ ] Load real map geometry
-- [ ] Render static meshes
-- [ ] Render textures/materials
-- [ ] Spawn player placeholder
-- [ ] Basic camera/player movement
+Να γίνει touch-first για Android / PWA.
 
-### Phase 5 — Playable prototype
+- tap-to-move
+- pinch zoom
+- mobile hotbar
+- virtual joystick option
+- compact chat
+- mobile HUD layout
+- performance mode
 
-- [ ] Character enter world packet flow
-- [ ] Movement sync
-- [ ] Object spawn packets
-- [ ] NPC/player visibility
-- [ ] Chat/system messages
-- [ ] Basic interactions
+### Milestone 4 — Full Visual Layer
+
+Να μοιάζει όλο και περισσότερο με κανονικό L2 client.
+
+- terrain
+- sky/water/lighting
+- character models
+- animations
+- skill effects
+- inventory / skills / target windows
 
 ---
 
 ## Development
 
-Εγκατάσταση dependencies:
-
 ```bash
 npm install
-```
-
-Development server:
-
-```bash
 npm run dev
-```
-
-Production build:
-
-```bash
 npm run build
-```
-
-Preview build:
-
-```bash
 npm run preview
-```
-
-Lint:
-
-```bash
 npm run lint
-```
-
-Format:
-
-```bash
 npm run format
 ```
 
@@ -289,40 +303,30 @@ npm run format
 
 ## Σημαντικές σημειώσεις
 
-Το project είναι πειραματικό και εξαρτάται από:
+Το project είναι experimental και εξαρτάται από:
 
-- Το protocol revision του server
-- Την έκδοση / chronicle του Lineage II server
-- Τη συμπεριφορά του login server
-- Τη διαθεσιμότητα TCP socket bridge runtime
-- Τη σωστή πρόσβαση σε client assets
+- protocol revision του server
+- Mobius/server build
+- login/game server συμπεριφορά
+- σωστή λειτουργία του WebSocket-to-TCP bridge
+- πρόσβαση σε client assets
+- browser support για WebGL / IndexedDB / File System Access API
 
-Διαφορετικά server builds μπορεί να χρειάζονται αλλαγές στα packets ή στο parsing.
+Διαφορετικά chronicles ή server builds μπορεί να χρειάζονται διαφορετικά packet layouts.
 
 ---
 
-## Ασφάλεια
+## Security notes
 
-Το bridge πρέπει πάντα να έχει περιορισμούς.
+Το bridge δεν πρέπει να γίνει open proxy.
 
-Δεν πρέπει να λειτουργεί ως open TCP proxy.
+Πρέπει να υπάρχουν:
 
-Συστήνεται:
-
-- Allowlist σε hostnames
-- Allowlist σε ports
+- host allowlist
+- port allowlist
 - HTTPS/WSS σε production
-- Καθόλου credentials σε logs
-- Rate limiting σε public deployment
-- Προσοχή σε debug protocol logs
-
----
-
-## Στόχος project
-
-Ο στόχος δεν είναι απλά να φτιαχτεί ένα website για Lineage II server.
-
-Ο στόχος είναι να δημιουργηθεί ένα πραγματικό browser-based L2 client experiment που μπορεί σταδιακά να εξελιχθεί από launcher/protocol prototype σε WebGL client με asset streaming και πραγματικό world rendering.
+- καθόλου credentials σε logs
+- περιορισμένα debug logs σε public deployment
 
 ---
 
