@@ -1,13 +1,7 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
+import loginVideo from "@/assets/l2-client/login_client_loop.mp4.asset.json";
+import loginPoster from "@/assets/l2-client/client_login_bg.jpg.asset.json";
 
-const BG = "/hud/screens/LogonScreen.png";
-
-/**
- * Login field rendered like the Windows client:
- *  - black chevron arrow on each outer side
- *  - light/white pill input with chamfered ends and gold edges
- *  - small "..." badge on the right inside the input
- */
 function LoginField({
   value,
   onChange,
@@ -21,94 +15,86 @@ function LoginField({
   placeholder?: string;
   onEnter?: () => void;
 }) {
-  const clip =
-    "polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%)";
+  const clip = "polygon(0 0, calc(100% - 20px) 0, 100% 50%, calc(100% - 20px) 100%, 0 100%)";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
-      {/* left chevron */}
+    <div
+      style={{
+        width: "39.6%",
+        height: "4.1%",
+        minHeight: 34,
+        padding: "2px 24px 2px 2px",
+        clipPath: clip,
+        background:
+          "linear-gradient(180deg, rgba(228,225,210,0.95), rgba(66,59,48,0.95) 47%, rgba(236,232,216,0.9) 52%, rgba(56,48,36,0.95))",
+        filter: "drop-shadow(0 2px 3px rgba(0,0,0,0.82))",
+      }}
+    >
       <div
         style={{
-          width: 22,
-          height: 38,
-          clipPath: "polygon(100% 0, 100% 100%, 0 50%)",
-          background:
-            "linear-gradient(180deg,#3a2e1c 0%,#0a0805 55%,#2a2014 100%)",
-          marginRight: -4,
-        }}
-      />
-      {/* field */}
-      <div
-        style={{
-          width: 440,
-          height: 38,
-          padding: 1,
+          width: "100%",
+          height: "100%",
           clipPath: clip,
           background:
-            "linear-gradient(180deg,#e8c98a 0%,#7a5a2c 50%,#3a2e1c 100%)",
+            "linear-gradient(180deg, rgba(24,22,18,0.9), rgba(5,5,5,0.9) 58%, rgba(24,20,14,0.94))",
+          display: "flex",
+          alignItems: "center",
+          padding: "0 46px 0 24px",
+          position: "relative",
         }}
       >
-        <div
+        <input
+          type="text"
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && onEnter?.()}
+          spellCheck={false}
+          autoComplete="new-password"
+          autoCorrect="off"
+          autoCapitalize="off"
+          data-lpignore="true"
+          data-1p-ignore="true"
+          data-bwignore="true"
+          data-form-type="other"
+          name={type === "password" ? "l2_secret" : "l2_account"}
           style={{
             width: "100%",
             height: "100%",
-            clipPath: clip,
-            background:
-              "linear-gradient(180deg,#f3ece0 0%,#e2d6bf 55%,#cdbe9f 100%)",
-            display: "flex",
-            alignItems: "center",
-            padding: "0 36px 0 20px",
-            position: "relative",
+            border: 0,
+            outline: "none",
+            background: "transparent",
+            color: "#e9e0c9",
+            textAlign: "center",
+            fontFamily: "Tahoma, Geneva, sans-serif",
+            fontSize: "clamp(18px, 1.45vw, 28px)",
+            letterSpacing: 0,
+            textShadow: "0 2px 2px #000",
+            ...(type === "password"
+              ? ({ WebkitTextSecurity: "disc" } as CSSProperties & { WebkitTextSecurity: string })
+              : {}),
+          }}
+        />
+        <span
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            right: 12,
+            top: "50%",
+            transform: "translateY(-50%)",
+            width: 28,
+            height: 28,
+            borderRadius: 4,
+            background: "rgba(170,174,180,0.72)",
+            color: "#f6f6f6",
+            fontSize: 18,
+            letterSpacing: 2,
+            lineHeight: "24px",
+            textAlign: "center",
           }}
         >
-          <input
-            type={type}
-            value={value}
-            placeholder={placeholder}
-            onChange={(e) => onChange(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && onEnter?.()}
-            spellCheck={false}
-            autoComplete="off"
-            data-lpignore="true"
-            data-form-type="other"
-            style={{
-              width: "100%",
-              height: "100%",
-              border: 0,
-              outline: "none",
-              background: "transparent",
-              color: "#000",
-              textAlign: "center",
-              fontFamily: "'Times New Roman', Georgia, serif",
-              fontSize: 20,
-              letterSpacing: 1,
-            }}
-          />
-          <span
-            style={{
-              position: "absolute",
-              right: 14,
-              top: "50%",
-              transform: "translateY(-50%)",
-              fontSize: 14,
-              color: "#3a2e1c",
-              letterSpacing: 2,
-            }}
-          >
-            ···
-          </span>
-        </div>
+          ···
+        </span>
       </div>
-      {/* right chevron */}
-      <div
-        style={{
-          width: 22,
-          height: 38,
-          clipPath: "polygon(0 0, 100% 50%, 0 100%)",
-          background:
-            "linear-gradient(180deg,#3a2e1c 0%,#0a0805 55%,#2a2014 100%)",
-          marginLeft: -4,
-        }}
-      />
     </div>
   );
 }
@@ -136,12 +122,13 @@ function LoginButton({
       onMouseDown={() => setDown(true)}
       onMouseUp={() => setDown(false)}
       style={{
-        width: 220,
-        height: 56,
-        padding: 1,
+        width: "13.8%",
+        minWidth: 180,
+        height: "5.6%",
+        minHeight: 48,
+        padding: 2,
         border: 0,
-        background:
-          "linear-gradient(180deg,#caa363 0%,#6e5326 50%,#3a2e1c 100%)",
+        background: "linear-gradient(180deg, #e0ded2 0%, #766f5b 44%, #eee9da 50%, #5c523e 100%)",
         cursor: disabled ? "default" : "pointer",
         opacity: disabled ? 0.55 : 1,
         boxShadow: down ? "inset 0 2px 6px rgba(0,0,0,0.7)" : "0 2px 8px rgba(0,0,0,0.6)",
@@ -155,41 +142,20 @@ function LoginButton({
           alignItems: "center",
           justifyContent: "center",
           background: down
-            ? "linear-gradient(180deg,#100d09,#231d14)"
+            ? "linear-gradient(180deg,#211d15,#13100b 58%,#2a2318)"
             : hover
-            ? "linear-gradient(180deg,#2a2418,#15110b)"
-            : "linear-gradient(180deg,#1a160f,#0a0805)",
-          color: "#e8dcb8",
-          fontFamily: "'Times New Roman', Georgia, serif",
-          fontSize: 26,
-          letterSpacing: 1,
+              ? "linear-gradient(180deg,#56513f,#1f1b12 58%,#3d3424)"
+              : "linear-gradient(180deg,#4a4638,#17130d 58%,#332b1e)",
+          color: "#ddd2bc",
+          fontFamily: "Tahoma, Geneva, sans-serif",
+          fontSize: "clamp(22px, 1.6vw, 32px)",
+          letterSpacing: 0,
           textShadow: "0 1px 2px rgba(0,0,0,0.9)",
         }}
       >
         {children}
       </div>
     </button>
-  );
-}
-
-function FooterLink({ children }: { children: React.ReactNode }) {
-  return (
-    <a
-      href="#"
-      onClick={(e) => e.preventDefault()}
-      style={{
-        color: "#e8dcb8",
-        fontFamily: "'Times New Roman', Georgia, serif",
-        fontSize: 14,
-        textDecoration: "none",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        textShadow: "0 1px 2px rgba(0,0,0,0.9)",
-      }}
-    >
-      {children} <span style={{ fontSize: 12 }}>↗</span>
-    </a>
   );
 }
 
@@ -210,27 +176,30 @@ export function L2LoginScreen({
 
   return (
     <div
-      suppressHydrationWarning
       style={{
         position: "fixed",
-        inset: 0,
+        left: 0,
+        top: 0,
+        width: "100vw",
+        height: "100vh",
         background: "#000",
-        fontFamily: "Tahoma, Geneva, sans-serif",
         overflow: "hidden",
+        fontFamily: "Tahoma, Geneva, sans-serif",
       }}
     >
       <video
-        src="/hud/videos/login_web.mp4"
+        src={loginVideo.url}
         autoPlay
         muted
         loop
         playsInline
-        poster={BG}
+        poster={loginPoster.url}
         style={{
           position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
+          left: 0,
+          top: 0,
+          width: "100vw",
+          height: "100vh",
           objectFit: "cover",
           pointerEvents: "none",
         }}
@@ -240,43 +209,69 @@ export function L2LoginScreen({
           position: "absolute",
           inset: 0,
           background:
-            "radial-gradient(circle at center, transparent 0%, transparent 55%, rgba(0,0,0,0.55) 100%)",
+            "radial-gradient(ellipse at center, rgba(255,255,255,0.02), rgba(0,0,0,0.12) 72%, rgba(0,0,0,0.34) 100%)",
         }}
       />
-
-      {/* Login stack */}
-      <div
-        style={{
-          position: "absolute",
-          left: "50%",
-          top: "58%",
-          transform: "translate(-50%, -50%)",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 14,
-        }}
-      >
-        <LoginField value={id} onChange={setId} onEnter={submit} />
-        <LoginField
-          value={pw}
-          onChange={setPw}
-          type="password"
-          onEnter={submit}
-        />
-
-        <div style={{ display: "flex", gap: 22, marginTop: 22 }}>
+      <div style={{ position: "absolute", left: 0, top: 0, width: "100vw", height: "100vh" }}>
+        <div
+          style={{
+            position: "absolute",
+            left: "50vw",
+            top: "38.3vh",
+            transform: "translateX(-50%)",
+            width: "100vw",
+            height: "4.1%",
+            display: "flex",
+            justifyContent: "center",
+          }}
+        >
+          <LoginField value={id} onChange={setId} onEnter={submit} />
+        </div>
+        <div
+          style={{
+            position: "absolute",
+            left: "50vw",
+            top: "43.6vh",
+            transform: "translateX(-50%)",
+            width: "100vw",
+            height: "4.1%",
+            display: "flex",
+            justifyContent: "center",
+          }}
+        >
+          <LoginField
+            value={pw}
+            onChange={setPw}
+            type="password"
+            placeholder="Password"
+            onEnter={submit}
+          />
+        </div>
+        <div
+          style={{
+            position: "absolute",
+            left: "50vw",
+            top: "51vh",
+            transform: "translateX(-50%)",
+            width: "100vw",
+            display: "flex",
+            justifyContent: "center",
+            gap: "2.45%",
+          }}
+        >
           <LoginButton onClick={submit} disabled={busy || !id.trim()}>
-            {busy ? "Connecting…" : "Log In"}
+            {busy ? "…" : "Log In"}
           </LoginButton>
           <LoginButton>Exit</LoginButton>
         </div>
-
         {error ? (
           <div
             style={{
-              marginTop: 8,
-              maxWidth: 460,
+              position: "absolute",
+              left: "50%",
+              top: "58.5%",
+              transform: "translateX(-50%)",
+              maxWidth: 520,
               textAlign: "center",
               fontSize: 13,
               color: "#ff8c8c",
@@ -286,63 +281,6 @@ export function L2LoginScreen({
             {error}
           </div>
         ) : null}
-      </div>
-
-      {/* Bottom-left: protocol log */}
-      <div
-        style={{
-          position: "absolute",
-          left: 14,
-          bottom: 28,
-          fontFamily: "'Courier New', monospace",
-          fontSize: 13,
-          color: "#e8dcb8",
-          letterSpacing: 2,
-          textShadow: "0 1px 2px #000",
-        }}
-      >
-        ▶ PROTOCOL LOG (0)
-      </div>
-
-      {/* Bottom-right: nav links */}
-      <div
-        style={{
-          position: "absolute",
-          right: 18,
-          bottom: 26,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "flex-end",
-          gap: 6,
-        }}
-      >
-        <FooterLink>New Account</FooterLink>
-        <FooterLink>Lost Account</FooterLink>
-        <FooterLink>Links</FooterLink>
-        <FooterLink>Settings</FooterLink>
-      </div>
-
-      {/* Bottom-center: brand strip */}
-      <div
-        style={{
-          position: "absolute",
-          left: "50%",
-          bottom: 8,
-          transform: "translateX(-50%)",
-          display: "flex",
-          gap: 28,
-          fontFamily: "'Times New Roman', Georgia, serif",
-          fontSize: 13,
-          color: "#cdbe9f",
-          letterSpacing: 4,
-          textShadow: "0 1px 2px #000",
-          whiteSpace: "nowrap",
-        }}
-      >
-        <span>L2</span>
-        <span>L2SLAVE</span>
-        <span style={{ letterSpacing: 1 }}>l2.slave.gr</span>
-        <span style={{ letterSpacing: 1 }}>Unofficial web client</span>
       </div>
     </div>
   );
