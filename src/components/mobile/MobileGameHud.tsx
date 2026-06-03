@@ -1,13 +1,14 @@
 import { useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
 
 interface MobileGameHudProps {
+  targetId?: number | null;
   onAttack?: () => void;
   onInteract?: () => void;
   onMove?: (dx: number, dy: number) => void;
   onSay?: (text: string) => void;
 }
 
-export function MobileGameHud({ onAttack, onInteract, onMove, onSay }: MobileGameHudProps) {
+export function MobileGameHud({ targetId, onAttack, onInteract, onMove, onSay }: MobileGameHudProps) {
   const [chatOpen, setChatOpen] = useState(false);
   const [chatText, setChatText] = useState("");
 
@@ -89,7 +90,7 @@ export function MobileGameHud({ onAttack, onInteract, onMove, onSay }: MobileGam
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded bg-black/50 border border-gold/40" />
           <div className="flex-1">
-            <div className="text-xs text-gold">No target</div>
+            <div className="text-xs text-gold">{targetId ? `Target #${targetId}` : "No target"}</div>
             <div className="h-1.5 bg-black/50 rounded mt-1 overflow-hidden">
               <div className="h-full w-full bg-red-600" />
             </div>
