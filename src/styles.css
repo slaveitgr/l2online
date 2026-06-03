@@ -429,3 +429,18 @@
   .l2-sysmsg .sm-sys { color: oklch(0.78 0.14 80); }
   .l2-sysmsg .sm-warn { color: oklch(0.7 0.2 25); }
 }
+
+@utility l2-mobile-panel {
+  border: 1px solid rgb(201 168 76 / 0.35);
+  background: linear-gradient(180deg, rgb(20 16 12 / 0.78), rgb(6 5 4 / 0.72));
+  backdrop-filter: blur(14px);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.08);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+@utility mobile-game-hud {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
