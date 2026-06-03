@@ -8,6 +8,7 @@ import {
 } from "@/lib/l2-protocol/game-client";
 import { SpriteProvider } from "@/components/hud/L2Sprite";
 import { L2CharSelectScreen, type CharSlot } from "@/components/hud/L2CharSelectScreen";
+import { CharacterModel } from "@/components/CharacterModel";
 
 export const Route = createFileRoute("/characters")({
   head: () => ({
