@@ -1,10 +1,22 @@
-import { useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { L2Button, L2Frame, L2Sprite, useSprites } from "./L2Sprite";
 
-const BG = "/hud/mock/login/login-bg-clean.jpg";
-const VIDEO = "/hud/videos/login_web.mp4";
+const CLIENT_LOGON = "/hud/screens/LogonScreen.png";
+
+const REQUIRED_CLIENT_REFS = [
+  "L2UI_CH3.LoginWnd.aboutOTPIcon_over",
+  "L2UI_CH3.LoginWnd.aboutOTPIcon_down",
+  "L2UI_CT1.Button.Button_DF_Click",
+  "L2UI_CT1.GroupBox.GroupBox_DF",
+  "L2UI.Control.CheckBox_checked",
+] as const;
 
 const fieldClip =
   "polygon(10px 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 10px 100%, 0 50%)";
+
+type AssetState = "loading" | "ok" | "failed";
+
+const textShadow = "0 1px 2px #000, 0 0 4px #000";
 
 function Field({
   value,
@@ -80,7 +92,8 @@ function Field({
           fontFamily: "Arial, Helvetica, sans-serif",
           fontSize: "clamp(10px, 0.78vw, 15px)",
           lineHeight: "100%",
-          textShadow: "0 1px 1px #000, 0 0 3px #000",
+          letterSpacing: 0,
+          textShadow,
           padding: "0 18px",
           caretColor: "#e6ddbb",
           ...(isPw
@@ -92,59 +105,151 @@ function Field({
   );
 }
 
-function Button({
+function LegacyButton({
   children,
   onClick,
   disabled,
   style,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   onClick?: () => void;
   disabled?: boolean;
   style: CSSProperties;
 }) {
-  const [hover, setHover] = useState(false);
-  const [down, setDown] = useState(false);
   return (
-    <button
-      type="button"
+    <L2Button
       onClick={onClick}
       disabled={disabled}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => {
-        setHover(false);
-        setDown(false);
-      }}
-      onMouseDown={() => setDown(true)}
-      onMouseUp={() => setDown(false)}
+      height={29}
+      width="5.45%"
       style={{
         position: "absolute",
-        width: "5.45%",
-        height: "3.13%",
-        border: `1px solid ${hover ? "rgba(230,215,156,0.82)" : "rgba(204,196,151,0.62)"}`,
-        borderRadius: 3,
-        clipPath:
-          "polygon(3px 0, calc(100% - 3px) 0, 100% 3px, 100% 100%, 0 100%, 0 3px)",
-        background: hover
-          ? "linear-gradient(to bottom, rgba(128,116,82,0.96), rgba(85,74,49,0.96) 44%, rgba(50,44,30,0.98))"
-          : "linear-gradient(to bottom, rgba(107,98,74,0.94) 0%, rgba(72,66,49,0.94) 42%, rgba(43,39,30,0.98) 100%)",
-        boxShadow:
-          "inset 0 1px 0 rgba(255,255,225,0.24), inset 0 -1px 0 rgba(0,0,0,0.75), 0 2px 3px rgba(0,0,0,0.88)",
-        color: hover ? "#fff" : "#e4dcc2",
-        textShadow: "0 1px 2px #000",
-        fontFamily: "Arial, Helvetica, sans-serif",
         fontSize: "clamp(9px, 0.66vw, 13px)",
-        lineHeight: "100%",
-        padding: 0,
-        cursor: disabled ? "default" : "pointer",
-        opacity: disabled ? 0.55 : 1,
-        transform: down ? "translateY(1px)" : undefined,
-        filter: down ? "brightness(0.9)" : undefined,
+        color: disabled ? "#7a7058" : "#e4dcc2",
         ...style,
       }}
     >
       {children}
-    </button>
+    </L2Button>
+  );
+}
+
+function Panel({ title, children, style }: { title: string; children: ReactNode; style: CSSProperties }) {
+  return (
+    <L2Frame
+      style={{
+        position: "absolute",
+        padding: 9,
+        background: "rgba(8, 7, 5, 0.72)",
+        boxShadow: "0 6px 18px rgba(0,0,0,0.72)",
+        color: "#d8c996",
+        fontSize: 11,
+        lineHeight: 1.35,
+        textShadow,
+        pointerEvents: "auto",
+        ...style,
+      }}
+    >
+      <div style={{ color: "#f2df9b", fontSize: 12, fontWeight: 700, marginBottom: 7, letterSpacing: 0 }}>
+        {title}
+      </div>
+      {children}
+    </L2Frame>
+  );
+}
+
+function StatusDot({ ok }: { ok: boolean }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        width: 7,
+        height: 7,
+        borderRadius: 7,
+        marginRight: 6,
+        background: ok ? "#8fcf62" : "#c96a55",
+        boxShadow: ok ? "0 0 5px rgba(143,207,98,0.75)" : "0 0 5px rgba(201,106,85,0.6)",
+      }}
+    />
+  );
+}
+
+function Row({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 4 }}>
+      <span style={{ color: "#a99b72" }}>
+        {typeof ok === "boolean" ? <StatusDot ok={ok} /> : null}
+        {label}
+      </span>
+      <span style={{ color: "#efe3bd", textAlign: "right", overflowWrap: "anywhere" }}>{value}</span>
+    </div>
+  );
+}
+
+function MenuPanel() {
+  const menuItems = ["Account", "Options", "Support", "Patch Notes"];
+  return (
+    <Panel title="MENU" style={{ left: "3.2%", top: "4%", width: 216 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+        {menuItems.map((item) => (
+          <L2Button key={item} variant="small" height={22} style={{ width: "100%" }}>
+            {item}
+          </L2Button>
+        ))}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 9 }}>
+        <L2Sprite refId="L2UI_CH3.LoginWnd.aboutOTPIcon_over" width={18} height={18} />
+        <span>OTP / account help assets from L2UI_CH3</span>
+      </div>
+    </Panel>
+  );
+}
+
+function ClientAssetPanel({ screenState }: { screenState: AssetState }) {
+  const sprites = useSprites();
+  const found = REQUIRED_CLIENT_REFS.filter((ref) => sprites?.has(ref)).length;
+  const manifestCount = useMemo(
+    () => (sprites ? Object.values(sprites.manifest).filter(Boolean).length : 0),
+    [sprites],
+  );
+
+  return (
+    <Panel title="CLIENT DATA" style={{ right: "3.2%", top: "4%", width: 300 }}>
+      <Row label="screen" value={CLIENT_LOGON} ok={screenState === "ok"} />
+      <Row label="ui manifest" value={sprites ? `${manifestCount} textures` : "loading"} ok={Boolean(sprites)} />
+      <Row label="required refs" value={`${found}/${REQUIRED_CLIENT_REFS.length}`} ok={found === REQUIRED_CLIENT_REFS.length} />
+      <div style={{ height: 1, background: "rgba(210,185,110,0.22)", margin: "8px 0" }} />
+      {REQUIRED_CLIENT_REFS.map((ref) => (
+        <Row key={ref} label={ref.split(".").pop() ?? ref} value={sprites?.has(ref) ? "ok" : "missing"} ok={Boolean(sprites?.has(ref))} />
+      ))}
+    </Panel>
+  );
+}
+
+function ServerInfoPanel({ busy }: { busy?: boolean }) {
+  return (
+    <Panel title="SERVER" style={{ left: "3.2%", bottom: "4%", width: 260 }}>
+      <Row label="login" value="l2server.slave.gr:2106" ok />
+      <Row label="protocol" value="502" ok />
+      <Row label="state" value={busy ? "connecting" : "ready"} ok={!busy} />
+    </Panel>
+  );
+}
+
+function LogPanel({ statusLog = [] }: { statusLog?: string[] }) {
+  const latest = statusLog.slice(-7);
+  return (
+    <Panel title="CONNECTION LOG" style={{ right: "3.2%", bottom: "4%", width: 340, minHeight: 104 }}>
+      {latest.length ? (
+        latest.map((line, idx) => (
+          <div key={`${idx}-${line}`} style={{ color: idx === latest.length - 1 ? "#fff0b8" : "#c8bb8a", marginBottom: 3 }}>
+            {line}
+          </div>
+        ))
+      ) : (
+        <div style={{ color: "#a99b72" }}>Waiting for login handshake.</div>
+      )}
+    </Panel>
   );
 }
 
@@ -152,13 +257,28 @@ export function L2LoginScreen({
   onLogin,
   error,
   busy,
+  statusLog,
 }: {
   onLogin?: (id: string, pw: string) => void;
   error?: string | null;
   busy?: boolean;
+  statusLog?: string[];
 }) {
   const [id, setId] = useState("");
   const [pw, setPw] = useState("");
+  const [screenState, setScreenState] = useState<AssetState>("loading");
+
+  useEffect(() => {
+    let alive = true;
+    const img = new Image();
+    img.onload = () => alive && setScreenState("ok");
+    img.onerror = () => alive && setScreenState("failed");
+    img.src = CLIENT_LOGON;
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const submit = () => {
     if (!busy && id.trim()) onLogin?.(id.trim(), pw);
   };
@@ -182,33 +302,22 @@ export function L2LoginScreen({
           width: "max(100vw, 177.7778vh)",
           height: "max(56.25vw, 100vh)",
           transform: "translate(-50%, -50%)",
-          background: `#000 url(${BG}) center/cover no-repeat`,
+          background: `#000 url(${CLIENT_LOGON}) center/cover no-repeat`,
         }}
       >
-        <video
-          src={VIDEO}
-          autoPlay
-          muted
-          loop
-          playsInline
-          style={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            pointerEvents: "none",
-            zIndex: 1,
-          }}
-        />
-        <div style={{ position: "absolute", inset: 0, zIndex: 2 }}>
+        <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.08)", pointerEvents: "none" }} />
+        <div style={{ position: "absolute", inset: 0, zIndex: 2, pointerEvents: "none" }}>
+          <MenuPanel />
+          <ClientAssetPanel screenState={screenState} />
+          <ServerInfoPanel busy={busy} />
+          <LogPanel statusLog={statusLog} />
           <Field
             name="l2_account"
             autoFocus
             value={id}
             onChange={setId}
             onEnter={submit}
-            style={{ left: "42.98%", top: "52.62%" }}
+            style={{ left: "42.98%", top: "52.62%", pointerEvents: "auto" }}
           />
           <Field
             name="l2_secret"
@@ -217,16 +326,16 @@ export function L2LoginScreen({
             value={pw}
             onChange={setPw}
             onEnter={submit}
-            style={{ left: "43.08%", top: "55.37%" }}
+            style={{ left: "43.08%", top: "55.37%", pointerEvents: "auto" }}
           />
-          <Button
+          <LegacyButton
             onClick={submit}
             disabled={busy || !id.trim()}
-            style={{ left: "44.25%", top: "58.55%" }}
+            style={{ left: "44.25%", top: "58.55%", pointerEvents: "auto" }}
           >
-            {busy ? "…" : "Log In"}
-          </Button>
-          <Button style={{ left: "50.10%", top: "58.55%" }}>Exit</Button>
+            {busy ? "..." : "Log In"}
+          </LegacyButton>
+          <LegacyButton style={{ left: "50.10%", top: "58.55%", pointerEvents: "auto" }}>Exit</LegacyButton>
           {error ? (
             <div
               style={{
@@ -236,7 +345,7 @@ export function L2LoginScreen({
                 transform: "translateX(-50%)",
                 color: "#ff8c8c",
                 fontSize: 13,
-                textShadow: "0 1px 2px #000",
+                textShadow,
                 textAlign: "center",
                 maxWidth: 520,
               }}
