@@ -24,6 +24,7 @@
  */
 import * as THREE from "three";
 import { L2Package, type MapPlacement, type L2Texture, type UExport } from "./l2-package";
+import { readIndexedMapPlacements } from "./l2-unreal-object-index";
 
 export type PackageSource = (packageName: string) => Promise<ArrayBuffer | null>;
 
@@ -80,8 +81,16 @@ export async function loadMap(
   const log = opts.onProgress ?? (() => {});
 
   const map = L2Package.from(unrBytes);
-  const placements = map.readMapPlacements().filter((p) => !skip(p.mesh));
-  log(`[map] ${placements.length} placements / ${new Set(placements.map((p) => p.pkg)).size} packages`);
+  const indexedPlacements = readIndexedMapPlacements(map);
+  const hiddenSkipped = indexedPlacements.filter((p) => p.hidden || p.deleteMe).length;
+  const placementSource: MapPlacement[] = indexedPlacements.length
+    ? indexedPlacements.filter((p) => !p.hidden && !p.deleteMe)
+    : map.readMapPlacements();
+  const placements = placementSource.filter((p) => !skip(p.mesh));
+  log(
+    `[map] ${placements.length} placements / ${new Set(placements.map((p) => p.pkg)).size} packages` +
+      (indexedPlacements.length ? ` · ${hiddenSkipped} hidden/deleted skipped` : ""),
+  );
 
   const origin =
     opts.origin ??
