@@ -1,39 +1,64 @@
 /**
- * L2 map loader for three.js.
+ * L2 map loader for three.js — geometry + textures.
  *
  * Assembles a real Lineage 2 map sector: reads a `.unr`, resolves every
- * StaticMeshActor to its mesh in a `.usx`, extracts geometry, and places each
- * instance at its real position/rotation/scale. Returns a THREE.Group ready to
- * drop into the scene (already axis-remapped L2→three and scaled down).
+ * StaticMeshActor to its mesh (`.usx`) AND its diffuse texture (`.utx`, via the
+ * Material→Shader/Combiner→Texture graph), and places each instance at its real
+ * position/rotation/scale. Returns a THREE.Group ready to add to the scene
+ * (already axis-remapped L2→three and scaled down).
  *
- * Validated pipeline (Python proof on 17_25.unr Ertheia: 2081 actors,
- * 7 packages, 112k triangles assembled).
+ * Validated end-to-end on real client files (17_25.unr Ertheia: 2081 actors;
+ * Material chain → "Ertheia_a_ground02" DXT1 512×512 decoded correctly).
  *
- *   const root = await loadMap(unrBytes, async (pkgName) => {
- *     const f = await getFile(`StaticMeshes/${pkgName}.usx`);
- *     return f ? f.buffer : null;
- *   });
+ *   const root = await loadMap(unrBytes, getPackage);  // see getPackage note
  *   scene.add(root);
+ *
+ * getPackage(name) must return the raw bytes of a package by NAME, trying both
+ * StaticMeshes/<name>.usx and Textures/<name>.utx (+ SysTextures). Example:
+ *   const tryFolders = async (name) => {
+ *     for (const p of [`StaticMeshes/${name}.usx`, `Textures/${name}.utx`, `SysTextures/${name}.utx`]) {
+ *       const f = (await getFile(p)) ?? (await readFromMount(p));
+ *       if (f) return f.buffer;
+ *     } return null;
+ *   };
  */
 import * as THREE from "three";
-import { L2Package, type MapPlacement } from "./l2-package";
+import { L2Package, type MapPlacement, type L2Texture, type UExport } from "./l2-package";
 
-/** Resolve a package name (e.g. "Ertheia_V_S") → its raw .usx bytes, or null. */
 export type PackageSource = (packageName: string) => Promise<ArrayBuffer | null>;
 
 export interface LoadMapOptions {
-  /** L2 units per scene unit (default 30 — buildings ~a few scene units). */
-  scale?: number;
-  /** World-space point that becomes the scene origin (default = map centroid). */
+  scale?: number; // L2 units per scene unit (default 30)
   origin?: { x: number; y: number; z: number };
-  /** Skip meshes whose name matches (default: sky/cloud backdrops). */
   skip?: (meshName: string) => boolean;
-  /** Material applied to all meshes (default: neutral stone). Textures: a later pass. */
-  material?: THREE.Material;
+  withTextures?: boolean; // default true
   onProgress?: (msg: string) => void;
 }
 
 const DEFAULT_SKIP = (n: string) => /sky|cloud|backdrop/i.test(n);
+
+const DXT_FORMAT: Record<string, number> = {
+  DXT1: THREE.RGBA_S3TC_DXT1_Format,
+  DXT3: THREE.RGBA_S3TC_DXT3_Format,
+  DXT5: THREE.RGBA_S3TC_DXT5_Format,
+};
+
+function toCompressedTexture(t: L2Texture): THREE.Texture | null {
+  const fmt = DXT_FORMAT[t.format];
+  if (!fmt) return null; // P8/RGBA8/G16 → handled later (CPU decode path)
+  const tex = new THREE.CompressedTexture(
+    [{ data: t.data, width: t.width, height: t.height } as unknown as ImageData],
+    t.width,
+    t.height,
+    fmt as THREE.CompressedPixelFormat,
+  );
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
 
 export async function loadMap(
   unrBytes: ArrayBuffer,
@@ -42,16 +67,13 @@ export async function loadMap(
 ): Promise<THREE.Group> {
   const scale = opts.scale ?? 30;
   const skip = opts.skip ?? DEFAULT_SKIP;
+  const withTex = opts.withTextures ?? true;
   const log = opts.onProgress ?? (() => {});
-  const material =
-    opts.material ?? new THREE.MeshStandardMaterial({ color: 0x9a8b73, roughness: 0.9, flatShading: false });
 
-  // 1) parse the map → placements
   const map = L2Package.from(unrBytes);
   const placements = map.readMapPlacements().filter((p) => !skip(p.mesh));
-  log(`[map] ${placements.length} placements across ${new Set(placements.map((p) => p.pkg)).size} packages`);
+  log(`[map] ${placements.length} placements / ${new Set(placements.map((p) => p.pkg)).size} packages`);
 
-  // 2) origin = centroid (unless given)
   const origin =
     opts.origin ??
     (() => {
@@ -60,45 +82,107 @@ export async function loadMap(
       return { x: s.x / n, y: s.y / n, z: s.z / n };
     })();
 
-  // 3) group placements by package
-  const byPkg = new Map<string, MapPlacement[]>();
-  for (const p of placements) {
-    if (!byPkg.has(p.pkg)) byPkg.set(p.pkg, []);
-    byPkg.get(p.pkg)!.push(p);
-  }
-
-  // L2 space group (z-up). The root remaps to three (y-up) + scales down.
-  const l2Group = new THREE.Group();
-
-  // 4) per package: load .usx once, build instanced meshes per unique mesh
-  for (const [pkgName, list] of byPkg) {
-    let usxBytes: ArrayBuffer | null = null;
+  // package cache (parse each .usx/.utx once)
+  const pkgCache = new Map<string, L2Package | null>();
+  const getPkg = async (name: string): Promise<L2Package | null> => {
+    if (pkgCache.has(name)) return pkgCache.get(name)!;
+    let pkg: L2Package | null = null;
     try {
-      usxBytes = await getPackage(pkgName);
+      const buf = await getPackage(name);
+      if (buf) pkg = L2Package.from(buf);
     } catch {
       /* ignore */
     }
-    if (!usxBytes) {
-      log(`[map] package missing: ${pkgName}.usx (${list.length} actors skipped)`);
+    pkgCache.set(name, pkg);
+    return pkg;
+  };
+
+  // resolve a material object-ref → a decoded diffuse texture (crosses packages)
+  const texCache = new Map<string, THREE.Texture | null>();
+  async function resolveTexture(pkg: L2Package, refIdx: number, depth = 0): Promise<THREE.Texture | null> {
+    if (depth > 8) return null;
+    const r = pkg.resolveRefFull(refIdx);
+    if (r.kind === "import") {
+      const tp = await getPkg(r.pkg);
+      if (!tp) return null;
+      const e = tp.findExport(r.name);
+      if (!e) return null;
+      return resolveInPkg(tp, e, depth + 1);
+    }
+    if (r.kind === "export") {
+      const e = pkg.exports[r.localExportIndex - 1];
+      if (!e) return null;
+      return resolveInPkg(pkg, e, depth + 1);
+    }
+    return null;
+  }
+  async function resolveInPkg(pkg: L2Package, e: UExport, depth: number): Promise<THREE.Texture | null> {
+    const cacheKey = `${pkg.signature}:${e.objectName}`;
+    if (texCache.has(cacheKey)) return texCache.get(cacheKey)!;
+    if (e.className === "Texture") {
+      const t = pkg.readTexture(e);
+      const tex = t ? toCompressedTexture(t) : null;
+      texCache.set(cacheKey, tex);
+      return tex;
+    }
+    const refs = pkg.objectRefs(e);
+    for (const key of ["Diffuse", "Material", "Material1", "Material2"]) {
+      if (key in refs) {
+        const tex = await resolveTexture(pkg, refs[key], depth + 1);
+        if (tex) {
+          texCache.set(cacheKey, tex);
+          return tex;
+        }
+      }
+    }
+    // fallback: any object ref
+    for (const v of Object.values(refs)) {
+      const tex = await resolveTexture(pkg, v, depth + 1);
+      if (tex) {
+        texCache.set(cacheKey, tex);
+        return tex;
+      }
+    }
+    texCache.set(cacheKey, null);
+    return null;
+  }
+
+  const l2Group = new THREE.Group();
+  const fallbackMat = new THREE.MeshStandardMaterial({ color: 0x8d8270, roughness: 0.92 });
+
+  // group placements by package, then by mesh
+  const byPkg = new Map<string, MapPlacement[]>();
+  for (const p of placements) (byPkg.get(p.pkg) ?? byPkg.set(p.pkg, []).get(p.pkg)!).push(p);
+
+  for (const [pkgName, list] of byPkg) {
+    const usx = await getPkg(pkgName);
+    if (!usx) {
+      log(`[map] missing ${pkgName}.usx (${list.length} skipped)`);
       continue;
     }
-    const usx = L2Package.from(usxBytes);
 
-    // bucket this package's placements by mesh name
     const byMesh = new Map<string, MapPlacement[]>();
-    for (const p of list) {
-      if (!byMesh.has(p.mesh)) byMesh.set(p.mesh, []);
-      byMesh.get(p.mesh)!.push(p);
-    }
+    for (const p of list) (byMesh.get(p.mesh) ?? byMesh.set(p.mesh, []).get(p.mesh)!).push(p);
 
     for (const [meshName, instances] of byMesh) {
-      const geomData = usx.readStaticMesh(meshName);
-      if (!geomData || geomData.indices.length === 0) continue;
+      const g = usx.readStaticMesh(meshName);
+      if (!g || g.indices.length === 0) continue;
 
       const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.BufferAttribute(geomData.positions, 3));
-      geo.setAttribute("normal", new THREE.BufferAttribute(geomData.normals, 3));
-      geo.setIndex(new THREE.BufferAttribute(geomData.indices, 1));
+      geo.setAttribute("position", new THREE.BufferAttribute(g.positions, 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(g.normals, 3));
+      if (g.uvs) geo.setAttribute("uv", new THREE.BufferAttribute(g.uvs, 2));
+      geo.setIndex(new THREE.BufferAttribute(g.indices, 1));
+
+      // material: real diffuse texture if available, else neutral
+      let material: THREE.Material = fallbackMat;
+      if (withTex && g.uvs) {
+        const ref = usx.meshMaterialRef(meshName);
+        if (ref != null) {
+          const tex = await resolveTexture(usx, ref);
+          if (tex) material = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, metalness: 0 });
+        }
+      }
 
       const inst = new THREE.InstancedMesh(geo, material, instances.length);
       const m = new THREE.Matrix4();
@@ -108,7 +192,6 @@ export async function loadMap(
       const scl = new THREE.Vector3();
       instances.forEach((p, i) => {
         pos.set(p.x - origin.x, p.y - origin.y, p.z - origin.z);
-        // UE rotator → Euler in L2 space (z-up). Yaw about z dominates.
         e.set(p.roll, p.pitch, p.yaw, "ZYX");
         q.setFromEuler(e);
         const s = p.scale || 1;
@@ -120,13 +203,12 @@ export async function loadMap(
       inst.frustumCulled = false;
       l2Group.add(inst);
     }
-    log(`[map] ${pkgName}: ${byMesh.size} meshes built`);
+    log(`[map] ${pkgName}: ${byMesh.size} meshes`);
   }
 
-  // 5) remap L2 (x,y,z z-up) → three (y-up) and scale down
   const root = new THREE.Group();
   root.add(l2Group);
-  l2Group.rotation.x = -Math.PI / 2; // z-up → y-up
+  l2Group.rotation.x = -Math.PI / 2; // L2 z-up → three y-up
   root.scale.setScalar(1 / scale);
   root.name = "L2Map";
   return root;
