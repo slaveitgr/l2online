@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { WorldViewport } from "@/components/WorldViewport";
-import { L2HudAuthentic } from "@/components/hud/L2HudAuthentic";
+import { L2HudMockup } from "@/components/hud/L2HudMockup";
 import { SpriteProvider } from "@/components/hud/L2Sprite";
 import { MobileGameHud } from "@/components/mobile/MobileGameHud";
 import { RotateDeviceOverlay } from "@/components/mobile/RotateDeviceOverlay";
@@ -134,7 +134,7 @@ function WorldPage() {
             <RotateDeviceOverlay />
           )
         ) : (
-          <L2HudAuthentic />
+          <L2HudMockup onExit={() => navigate({ to: "/characters" })} />
         )}
       </SpriteProvider>
 
