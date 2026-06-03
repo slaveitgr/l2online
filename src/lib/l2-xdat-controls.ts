@@ -145,7 +145,7 @@ function parseControls(bytes: Uint8Array, start = 1000, end = bytes.length): Xda
     let texture: string | null = null;
     for (let i = tokens.length - 1; i >= 0; i--) {
       const token = tokens[i];
-      if (token.kind === "string" && looksLikeTextureRef(token.value)) {
+      if (token.kind === "string" && typeof token.value === "string" && looksLikeTextureRef(token.value)) {
         texture = token.value;
         break;
       }
