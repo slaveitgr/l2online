@@ -239,5 +239,3 @@ export function L2LoginScreen({
     </div>
   );
 }
-{/* avoid unused L2Button import warning when sprite primitives aren't used here */}
-export const _unused = L2Button;
