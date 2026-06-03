@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { listFiles, getManifest, getCacheStats, getFile, formatBytes, type CachedFileMeta } from "@/lib/l2-assets";
-import { readFromMount } from "@/lib/local-mount";
+import { listMountFiles, readFromMount } from "@/lib/local-mount";
 import { L2Package } from "@/lib/l2-package";
 import { loadMap } from "@/lib/map-loader";
 import { getGameConnection, type GameEvent, type WorldEntity } from "@/lib/l2-protocol/game-client";
@@ -229,17 +229,31 @@ export function WorldViewport() {
 
     // ── Asset loader hook (reads cached client) ──────────────────────────
     (async () => {
-      setLoadStatus("Reading cached client…");
+      setLoadStatus("Reading mounted/cached client…");
       const [manifest, stats] = await Promise.all([getManifest().catch(() => null), getCacheStats().catch(() => null)]);
       const rootName = manifest?.rootName ?? "CDN cache";
-      const maps = await listFiles("maps").catch(() => []);
-      const textures = (await listFiles("textures").catch(() => [])).length;
-      const meshes = (await listFiles("staticmeshes").catch(() => [])).length;
-      setAssetSummary({ rootName, maps, textures, meshes });
+      const [cachedMaps, mountedMaps, cachedTextures, mountedTextures, cachedMeshes, mountedMeshes] = await Promise.all([
+        listFiles("maps").catch(() => []),
+        listMountFiles("Maps").catch(() => []),
+        listFiles("textures").catch(() => []),
+        listMountFiles("Textures").catch(() => []),
+        listFiles("staticmeshes").catch(() => []),
+        listMountFiles("StaticMeshes").catch(() => []),
+      ]);
+      const mapPaths = new Set<string>();
+      const maps = [...mountedMaps, ...cachedMaps].filter((m) => {
+        const key = m.path.toLowerCase();
+        if (mapPaths.has(key)) return false;
+        mapPaths.add(key);
+        return true;
+      });
+      const textures = Math.max(cachedTextures.length, mountedTextures.length);
+      const meshes = Math.max(cachedMeshes.length, mountedMeshes.length);
+      setAssetSummary({ rootName: mountedMaps.length ? "Mounted client" : rootName, maps, textures, meshes });
       if (stats && stats.cachedFiles > 0)
         setLoadStatus(`${stats.cachedFiles}/${stats.totalFiles} files cached · ${formatBytes(stats.cachedBytes)}`);
       else if (maps.length > 0) setLoadStatus(`Found ${maps.length} maps · loading sector…`);
-      else { setLoadStatus("No cached assets. Visit /cdn-cache to stream from CDN."); return; }
+      else setLoadStatus("No cache found · checking mounted client folder…");
 
       // Try preferred sectors first, then any cached map. Mount → cache fallback.
       const candidates = ["Maps/22_22.unr", "maps/22_22.unr", "Maps/17_25.unr", "maps/17_25.unr", ...maps.map((m) => m.path)];
@@ -277,7 +291,7 @@ export function WorldViewport() {
           return null;
         }
       };
-      const meshFolder = (await listFiles("staticmeshes").catch(() => [])) as CachedFileMeta[];
+      const meshFolder = [...mountedMeshes, ...cachedMeshes] as CachedFileMeta[];
       const meshIndex = new Map<string, string>(); // lower(basename) → path
       for (const f of meshFolder) {
         const base = f.path.split("/").pop()!.replace(/\.usx$/i, "").toLowerCase();
