@@ -1,42 +1,53 @@
-# Apply richer character roster parsing
+# Ενσωμάτωση Authentic L2 UI (πραγματικά client sprites)
 
-## 1. Replace `src/lib/l2-protocol/game-client.ts`
+Το archive φέρνει 1.638 PNG sprites (24MB) που έχουν αποκωδικοποιηθεί από τα πραγματικά L2 `SysTextures/*.utx` + 4 νέα αρχεία κώδικα που τα οδηγούν. Το `tools.zip` είναι offline pipeline scripts (Node).
 
-Overwrite with the uploaded version. The only meaningful diff vs current:
+## 1. Sprite assets → `public/hud/`
 
-- `GameCharacter` gains `hp`, `mp`, `sp`, `expPercent`.
-- `parseCharSelectionInfo` no longer `r.skip(...)`s the stat block — it now reads:
-  - `hp = r.f64()` (current HP, == max at char select)
-  - `mp = r.f64()` (current MP)
-  - `sp = Number(r.u64())`
-  - skips absolute exp (`r.u64()`)
-  - `expPct = r.f64()` → stored as `expPercent = expPct * 100`
-  - then `level = r.u32()`
-- Everything else (world entity layer, opcodes, encryption, EnterWorld, NpcInfo/Move/Delete parsing, action senders) stays byte-identical.
+Unzip του `l2online_hud_sprites.zip` μέσα στο `public/`:
 
-No other files in `src/lib/l2-protocol/` are touched.
+```
+public/hud/ui/manifest.json
+public/hud/ui/L2UI_CT1/*.png      (~1.615 chrome sprites)
+public/hud/ui/L2UI_NewTex/*.png
+public/hud/ui/L2UI_CH3/*.png
+public/hud/ui/L2UI_EPIC/*.png
+public/hud/ui/BMProduct/*.png
+public/hud/ui/Default/*.png
+public/hud/ui/LineageDecosTex/*.png
+public/hud/gauges/{CP,HP,MP,EXP,VP}_{bg,fill}.png
+```
 
-## 2. Wire real stats into `src/routes/characters.tsx`
+Σερβίρονται static από `/hud/...` — το `loadSprites()` κάνει `fetch("/hud/ui/manifest.json")`.
 
-In the center-bottom stats panel (currently shows `"—"` placeholders), use the new fields on `sel`:
+## 2. Νέα/αντικαταστάσιμα source αρχεία
 
-- HP row: `value="{hp} / {hp}"`, `pct={1}` (full at char-select).
-- MP row: `value="{mp} / {mp}"`, `pct={1}`.
-- VP row: leave as-is (no data yet).
-- XP row: `value="{expPercent.toFixed(4)}%"`, `pct={expPercent/100}`.
-- SP row (the bottom flex line): replace the `race` text in the middle with `SP {sp.toLocaleString()}`, keep `Rep. 0` on the right, and move race into the small header line under the name (`Lv.X {klass} · {race}`).
+| Αρχείο | Ενέργεια |
+|---|---|
+| `src/lib/l2-protocol/l2-ui-sprites.ts` | **Νέο** — sprite registry (resolves xdat refs σε PNG urls, 9-slice insets, canonical `UI.*` refs). |
+| `src/components/hud/L2Sprite.tsx` | **Νέο** — `SpriteProvider`, `L2Sprite`, `L2Frame` (9-slice), `L2Button` (3-state), `L2Slot`, `L2Checkbox`, `L2Tab`. |
+| `src/components/hud/L2Gauge.tsx` | **Αντικατάσταση** — από abstract gauge σε πραγματικά `Gauge_DF_Large_{HP,MP,CP,EXP,VP}` strip sprites. |
+| `src/components/hud/L2HudAuthentic.tsx` | **Αντικατάσταση** — wired με `getGameConnection().addListener` (player/char-selected events) + νέα primitives. Παραμένει το ίδιο API (`<L2HudAuthentic uiScale={1.35}/>`). |
 
-Values are rounded with `| 0` for HP/MP so we don't show floats like `2122.0`.
+Σημείωση: τα αρχεία του archive ορίζουν imports `@/components/l2/...`. Θα τα ρυθμίσω σε `@/components/hud/...` για να ταιριάζουν με τη δομή του project (καθώς ο υπόλοιπος HUD είναι εκεί).
 
-No styling, layout, or other UI changes. Sessions that already cached an older roster in `sessionStorage` will show `NaN`/`undefined` until next login — acceptable (next login re-parses with the new shape).
+## 3. Mount στο `/world`
 
-## 3. Out of scope
+Στο `src/routes/world.tsx`, wrap το mobile/desktop HUD render σε `<SpriteProvider>` (single provider — manifest fetch γίνεται μία φορά). Δεν αλλάζει το game viewport/scene logic.
 
-- No `UserInfo (0x32)` parsing yet (would give live current/max separately in-world).
-- No textures / map-loader / xdat work — separate threads.
-- No changes to `world.tsx`, viewport, HUD, or PWA files.
+## 4. Tools (offline pipeline)
 
-## Technical notes
+Τα `.mjs` scripts είναι για τοπικό decode pipeline (διαβάζουν `.l2system-index/` που δεν υπάρχει στο cloud project). Αποθηκεύονται **ως reference μόνο** στο `tools/` του repo (όχι στο build) ώστε να τα έχεις διαθέσιμα όταν θες να ξανατρέξεις το extraction τοπικά.
 
-- `PacketReader.f64()` / `u64()` already exist in `packets.ts` (used elsewhere in `parseCharSelected`), so no new reader methods are needed.
-- `CHAR_TAIL_AFTER_LEVEL = 495` is unchanged — the bytes we now actively read were previously inside the skipped region between `serverId` and `level`, so the per-character footprint and tail offset stay correct.
+## 5. Εκτός scope
+
+- Δεν αγγίζει `game-client.ts`, `world.tsx` scene/viewport, char-select panel, ή PWA/manifest.
+- Δεν αλλάζει το `L2Hud.tsx` (παλιό) — μένει σε περίπτωση που θες να γυρίσεις πίσω.
+- Δεν αλλάζει build pipeline (24MB extra στο `public/` φορτώνεται lazy ανά sprite από το browser).
+
+## Τεχνικές σημειώσεις
+
+- `SpriteProvider` κάνει cache το manifest module-level, οπότε ασφαλές για re-mount.
+- `L2Frame`/`L2Button` χρησιμοποιούν CSS `border-image` για 9-slice — zero JS overhead.
+- Αν λείπει sprite, τα primitives κάνουν fallback σε plain border styling (graceful degrade).
+- Το `useEffect` του `L2HudAuthentic` διαβάζει `sessionStorage.l2.activeChar` πριν συνδεθεί στον `getGameConnection()` — ίδιο pattern με το υπάρχον HUD.
