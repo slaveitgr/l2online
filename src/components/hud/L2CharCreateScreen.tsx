@@ -131,7 +131,25 @@ export function L2CharCreateScreen({
     >
       <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.35))" }} />
 
-      <div style={{ position: "absolute", left: 42, top: 58, width: 265, color: "#e8d7b0", textShadow: "0 2px 6px rgba(0,0,0,0.65)" }}>
+      <div
+        style={{
+          position: "absolute",
+          left: 16,
+          top: 6,
+          fontFamily: "'Times New Roman', Georgia, serif",
+          fontSize: 40,
+          fontWeight: 700,
+          letterSpacing: 3,
+          color: "#ffffff",
+          textShadow: "0 2px 6px rgba(0,0,0,0.85), 0 0 18px rgba(0,0,0,0.5)",
+          textTransform: "uppercase",
+        }}
+      >
+        Make Your Character
+      </div>
+
+
+      <div style={{ position: "absolute", left: 42, top: 100, width: 290, color: "#e8d7b0", textShadow: "0 2px 6px rgba(0,0,0,0.65)" }}>
         <div style={{ fontSize: 30, fontStyle: "italic", color: "#d8b464", marginBottom: 14 }}>{race}</div>
         <div style={{ fontSize: 16, lineHeight: 1.55, color: "rgba(255,255,255,0.82)" }}>{RACE_DESCRIPTIONS[race]}</div>
         <div style={{ marginTop: 24, fontSize: 16, color: "#f0d27f" }}>Race Characteristics</div>
@@ -152,7 +170,7 @@ export function L2CharCreateScreen({
         </div>
       </div>
 
-      <div style={{ position: "absolute", left: "34%", right: "25%", top: 34, display: "flex", justifyContent: "center", gap: 22 }}>
+      <div style={{ position: "absolute", left: "38%", right: 24, top: 18, display: "flex", justifyContent: "flex-end", gap: 26, alignItems: "center" }}>
         {RACES.map((entry, i) => {
           const active = i === raceI;
           return (

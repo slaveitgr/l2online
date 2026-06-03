@@ -76,15 +76,32 @@ export function L2CharSelectScreen({
         style={{
           position: "absolute",
           left: 16,
-          top: 12,
-          fontSize: 28,
-          fontWeight: 300,
+          top: 6,
+          fontSize: 14,
           color: "rgba(255,255,255,0.92)",
-          textShadow: "0 2px 4px rgba(0,0,0,0.35)",
+          textShadow: "0 2px 4px rgba(0,0,0,0.55)",
+          fontFamily: "Tahoma, Geneva, sans-serif",
         }}
       >
         Select Character
       </div>
+      <div
+        style={{
+          position: "absolute",
+          left: 16,
+          top: 22,
+          fontFamily: "'Times New Roman', Georgia, serif",
+          fontSize: 44,
+          fontWeight: 700,
+          letterSpacing: 3,
+          color: "#ffffff",
+          textShadow: "0 2px 6px rgba(0,0,0,0.85), 0 0 18px rgba(0,0,0,0.5)",
+          textTransform: "uppercase",
+        }}
+      >
+        Select Your Character
+      </div>
+
 
       <div
         style={{
