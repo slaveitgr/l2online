@@ -229,7 +229,7 @@ export function WorldViewport() {
 
     // ── Asset loader hook (reads cached client) ──────────────────────────
     (async () => {
-      setLoadStatus("Reading cached client…");
+      setLoadStatus("Reading mounted/cached client…");
       const [manifest, stats] = await Promise.all([getManifest().catch(() => null), getCacheStats().catch(() => null)]);
       const rootName = manifest?.rootName ?? "CDN cache";
       const maps = await listFiles("maps").catch(() => []);
@@ -239,7 +239,7 @@ export function WorldViewport() {
       if (stats && stats.cachedFiles > 0)
         setLoadStatus(`${stats.cachedFiles}/${stats.totalFiles} files cached · ${formatBytes(stats.cachedBytes)}`);
       else if (maps.length > 0) setLoadStatus(`Found ${maps.length} maps · loading sector…`);
-      else { setLoadStatus("No cached assets. Visit /cdn-cache to stream from CDN."); return; }
+      else setLoadStatus("No cache found · checking mounted client folder…");
 
       // Try preferred sectors first, then any cached map. Mount → cache fallback.
       const candidates = ["Maps/22_22.unr", "maps/22_22.unr", "Maps/17_25.unr", "maps/17_25.unr", ...maps.map((m) => m.path)];
