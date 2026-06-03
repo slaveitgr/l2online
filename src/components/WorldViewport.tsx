@@ -95,9 +95,11 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     const origin = player ? { x: player.x, y: player.y, z: player.z } : { x: 0, y: 0, z: 0 };
     setWorldPos(origin);
 
-    // L2 (x east, y north, z up) → three (x right, y up, z south).
+    // L2 (x east, y north, z up) → three (x right, y up, z forward).
+    // Matches the map-loader convention (l2Group.rotation.x = -PI/2 → three.z = -L2.y)
+    // so entities, the player and the static map share ONE coordinate frame.
     const toScene = (wx: number, wy: number, wz: number) =>
-      new THREE.Vector3((wx - origin.x) / SCALE, (wz - origin.z) / SCALE, (wy - origin.y) / SCALE);
+      new THREE.Vector3((wx - origin.x) / SCALE, (wz - origin.z) / SCALE, -(wy - origin.y) / SCALE);
 
     // Player marker — a teal cone shown immediately, then replaced by the real
     // 3D character model once it loads (Phase: player avatar in-world).
@@ -253,7 +255,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
           const p = groundHits[0].point;
           // scene → L2 world (inverse of toScene)
           const wx = Math.round(p.x * SCALE + origin.x);
-          const wy = Math.round(p.z * SCALE + origin.y);
+          const wy = Math.round(-p.z * SCALE + origin.y);
           const wz = Math.round(p.y * SCALE + origin.z);
           onGroundTap(wx, wy, wz);
         }
@@ -390,6 +392,9 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
           },
           {
             scale: SCALE,
+            // Anchor the static map to the SAME origin as the player/entities so the
+            // buildings render around the player instead of around the map centroid.
+            origin: { x: origin.x, y: origin.y, z: origin.z },
             onProgress: (msg) => {
               console.log(msg);
               setLoadStatus(msg);
