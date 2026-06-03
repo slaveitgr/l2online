@@ -92,6 +92,26 @@ export async function readFromMount(path: string): Promise<Uint8Array | null> {
   return new Uint8Array(await file.arrayBuffer());
 }
 
+export async function listMountFiles(folder: string): Promise<Array<{ path: string; size: number; ext: string }>> {
+  const root = await getMountedHandle();
+  if (!root) return [];
+  const granted = await ensurePermission(root);
+  if (!granted) return [];
+
+  const folderName = folder.toLowerCase();
+  const dir = root.name.toLowerCase() === folderName ? root : await findDirChild(root, folderName);
+  if (!dir) return [];
+
+  const files: Array<{ path: string; size: number; ext: string }> = [];
+  for await (const [name, handle] of (dir as unknown as AsyncIterable<[string, FileSystemHandle]>)) {
+    if (handle.kind !== "file") continue;
+    const file = await (handle as FileSystemFileHandle).getFile();
+    const ext = name.toLowerCase().split(".").pop() ?? "";
+    files.push({ path: `${folder}/${name}`, size: file.size, ext });
+  }
+  return files;
+}
+
 async function findDirChild(dir: DirHandle, nameLower: string): Promise<DirHandle | null> {
   for await (const [name, handle] of (dir as unknown as AsyncIterable<[string, FileSystemHandle]>)) {
     if (handle.kind === "directory" && name.toLowerCase() === nameLower) return handle as DirHandle;
