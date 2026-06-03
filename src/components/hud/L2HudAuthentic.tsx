@@ -9,6 +9,8 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { getGameConnection, type GameEvent, type PlayerState } from "@/lib/l2-protocol/game-client";
 import { L2Frame, L2Slot, L2Sprite } from "@/components/hud/L2Sprite";
 import { L2Gauge } from "@/components/hud/L2Gauge";
+import { L2SystemMenu } from "@/components/hud/L2SystemMenu";
+import { L2SettingsWindow, L2CalendarWindow, L2ExitDialog } from "@/components/hud/L2GameWindows";
 
 export interface HudActiveChar {
   name: string;
@@ -63,6 +65,26 @@ export function L2HudAuthentic({
   const [hp, setHp] = useState({ cur: activeChar?.hp ?? 1, max: activeChar?.hpMax ?? activeChar?.hp ?? 1 });
   const [mp, setMp] = useState({ cur: activeChar?.mp ?? 1, max: activeChar?.mpMax ?? activeChar?.mp ?? 1 });
   const [cp, setCp] = useState({ cur: activeChar?.cp ?? 0, max: activeChar?.cpMax ?? activeChar?.cp ?? 1 });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [activeWindow, setActiveWindow] = useState<"settings" | "calendar" | null>(null);
+  const [exitOpen, setExitOpen] = useState(false);
+
+  // Toggle the system menu with the X key, like the real client.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === "x" && !(e.target as HTMLElement)?.matches?.("input,textarea")) setMenuOpen((v) => !v);
+      if (e.key === "Escape") { setMenuOpen(false); setActiveWindow(null); setExitOpen(false); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const handleMenu = (key: string) => {
+    if (key === "settings") { setActiveWindow("settings"); setMenuOpen(false); }
+    else if (key === "calendar") { setActiveWindow("calendar"); setMenuOpen(false); }
+    else if (key === "characters" || key === "exit") { setExitOpen(true); setMenuOpen(false); }
+    else setMenuOpen(false);
+  };
 
   useEffect(() => {
     if (!activeChar) return;
@@ -158,16 +180,15 @@ export function L2HudAuthentic({
       </div>
 
       <div style={{ ...corner({ right: 8, bottom: 30, display: "flex", gap: 5, alignItems: "center", fontSize: 17, color: "#b5a273" }, "bottom right") }}>
-        {["♻", "⚒", "🎒", "📖", "✉", "☰"].map((ic, i) => <span key={i}>{ic}</span>)}
-        {onExit && (
-          <button
-            type="button"
-            onClick={onExit}
-            style={{ pointerEvents: "auto", marginLeft: 4, border: "1px solid #4a4236", background: "#15130f", color: "#c9a04a", fontSize: 10, height: 20, padding: "0 7px", cursor: "pointer" }}
-          >
-            EXIT
-          </button>
-        )}
+        {["♻", "⚒", "🎒", "📖", "✉"].map((ic, i) => <span key={i}>{ic}</span>)}
+        <button
+          type="button"
+          onClick={() => setMenuOpen((v) => !v)}
+          title="System Menu (X)"
+          style={{ pointerEvents: "auto", background: "none", border: "none", color: menuOpen ? "#e6c87a" : "#b5a273", fontSize: 17, cursor: "pointer", lineHeight: 1 }}
+        >
+          ☰
+        </button>
       </div>
 
       <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 20 * uiScale, background: "linear-gradient(180deg,#15130f,#0c0b08)", borderTop: "1px solid #4a4236", display: "flex", alignItems: "center", padding: "0 8px", gap: 12, fontSize: 10 * uiScale, color: "#b5a273" }}>
@@ -182,6 +203,12 @@ export function L2HudAuthentic({
       </div>
 
       <span style={{ display: "none" }}><L2Sprite refId="L2UI_CT1.Divider_DF" /></span>
+
+      {/* in-game windows */}
+      <L2SystemMenu open={menuOpen} onClose={() => setMenuOpen(false)} onSelect={handleMenu} />
+      {activeWindow === "settings" && <L2SettingsWindow onClose={() => setActiveWindow(null)} />}
+      {activeWindow === "calendar" && <L2CalendarWindow onClose={() => setActiveWindow(null)} />}
+      {exitOpen && <L2ExitDialog onExit={() => { setExitOpen(false); onExit?.(); }} onCancel={() => setExitOpen(false)} />}
     </div>
   );
 }
