@@ -2,7 +2,8 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { L2LoginClient, type GameServer, type LoginEvent } from "@/lib/l2-protocol/login-client";
 import { L2GameClient, setGameConnection, type GameEvent } from "@/lib/l2-protocol/game-client";
-import loginVideo from "@/assets/login_web.mp4.asset.json";
+import { SpriteProvider, L2Frame, L2Button } from "@/components/hud/L2Sprite";
+import { L2LoginScreen } from "@/components/hud/L2LoginScreen";
 
 const GAME_PROTOCOL = 502;
 
@@ -21,18 +22,14 @@ type Phase = "login" | "server-select";
 function Launcher() {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
   const [phase, setPhase] = useState<Phase>("login");
   const [servers, setServers] = useState<GameServer[]>([]);
   const [selectedServer, setSelectedServer] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusLog, setStatusLog] = useState<string[]>([]);
-  const [muted, setMuted] = useState(true);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
-    // Clear any stale log when landing on launcher
     try {
       const raw = sessionStorage.getItem("l2_gslog");
       if (raw) setStatusLog(JSON.parse(raw));
@@ -49,8 +46,8 @@ function Launcher() {
 
   const loginRef = useRef<L2LoginClient | null>(null);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function doLogin(id: string, pw: string) {
+    setUsername(id);
     setError(null);
     setServers([]);
     setStatusLog([]);
@@ -60,19 +57,13 @@ function Launcher() {
     const port = 2106;
     try {
       const client = new L2LoginClient({
-        host,
-        port,
-        username,
-        password,
+        host, port, username: id, password: pw,
         onEvent: (ev: LoginEvent) => {
-          console.log("[LS]", ev);
           if (ev.type === "status") pushStatus(ev.message);
           else if (ev.type === "init") pushStatus(`Init: protocol=${ev.protocolRevision}`);
           else if (ev.type === "gg-ok") pushStatus("GameGuard OK");
           else if (ev.type === "login-ok") pushStatus("LoginOk — requesting server list");
-          else if (ev.type === "raw") {
-            pushStatus(`← opcode 0x${ev.opcode.toString(16).padStart(2, "0")} (${ev.bytes.length}B)`);
-          }
+          else if (ev.type === "raw") pushStatus(`← opcode 0x${ev.opcode.toString(16).padStart(2, "0")} (${ev.bytes.length}B)`);
         },
       });
       loginRef.current = client;
@@ -81,13 +72,9 @@ function Launcher() {
         setServers(result.servers);
         setSelectedServer(result.servers[0]?.id ?? null);
         setPhase("server-select");
-      } else if (result.type === "login-fail") {
-        setError(`Login failed: ${result.reason}`);
-      } else if (result.type === "error") {
-        setError(result.error);
-      } else if (result.type === "closed") {
-        setError("Connection closed before completion.");
-      }
+      } else if (result.type === "login-fail") setError(`Login failed: ${result.reason}`);
+      else if (result.type === "error") setError(result.error);
+      else if (result.type === "closed") setError("Connection closed before completion.");
     } finally {
       setBusy(false);
     }
@@ -121,19 +108,11 @@ function Launcher() {
 
       pushStatus(`Connecting to game server ${server.ip}:${server.port}…`);
       const gs = new L2GameClient({
-        host: server.ip,
-        port: server.port,
-        username,
+        host: server.ip, port: server.port, username,
         protocolRevision: GAME_PROTOCOL,
-        loginKey1: k1,
-        loginKey2: k2,
-        playKey1: p1,
-        playKey2: p2,
+        loginKey1: k1, loginKey2: k2, playKey1: p1, playKey2: p2,
         keepAlive: true,
-        onEvent: (ev: GameEvent) => {
-          console.log("[GS]", ev);
-          if (ev.type === "status") pushStatus(ev.message);
-        },
+        onEvent: (ev: GameEvent) => { if (ev.type === "status") pushStatus(ev.message); },
       });
       const gr = await gs.start();
       if (gr.type === "characters") {
@@ -154,169 +133,61 @@ function Launcher() {
   }
 
   return (
-    <div className="fixed inset-0 overflow-hidden l2-bg-login">
-      {/* Background video */}
-      <video
-        ref={videoRef}
-        autoPlay
-        loop
-        playsInline
-        preload="auto"
-        muted={muted}
-        className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-        src={loginVideo.url}
-      />
-      <div className="absolute inset-0 bg-black/50 pointer-events-none" />
-      <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/70 pointer-events-none" />
-
-      {/* Sound toggle */}
-      <button
-        type="button"
-        onClick={() => {
-          const v = videoRef.current;
-          if (!v) return;
-          const next = !muted;
-          v.muted = next;
-          if (!next) v.play().catch(() => {});
-          setMuted(next);
-        }}
-        className="absolute top-3 right-3 z-20 l2-corner-link pointer-events-auto"
-        aria-label={muted ? "Unmute" : "Mute"}
-      >
-        {muted ? "🔇 Sound Off" : "🔊 Sound On"}
-      </button>
-
-
-      {/* Center modal — Login or Server select */}
-      <div className="absolute inset-0 flex items-center justify-center">
-        {phase === "login" ? (
-          <form onSubmit={onSubmit} className="l2-frame rounded px-4 py-3 w-[300px] space-y-2" suppressHydrationWarning>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Login"
-              autoComplete="username"
-              className="l2-input"
-              autoFocus
-            />
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Password"
-              autoComplete="current-password"
-              className="l2-input"
-            />
-            <div className="flex gap-2 pt-1">
-              <button
-                type="submit"
-                disabled={busy || !username || !password}
-                className="l2-button flex-1"
-              >
-                {busy ? "…" : "Log In"}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setUsername(""); setPassword(""); setError(null); }}
-                className="l2-button flex-1"
-              >
-                Exit
-              </button>
+    <SpriteProvider>
+      {phase === "login" ? (
+        <L2LoginScreen onLogin={doLogin} busy={busy} error={error} />
+      ) : (
+        <div style={{ position: "fixed", inset: 0, background: `#000 url(/hud/screens/LogonScreen.png) center/cover no-repeat`, fontFamily: "Tahoma, sans-serif" }}>
+          <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.55) 100%)" }} />
+          <L2Frame
+            refId="L2UI_CT1.GroupBox_Black"
+            style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: 460, padding: "16px 20px", background: "rgba(6,7,9,0.62)", color: "#e6dcc0" }}
+          >
+            <div style={{ textAlign: "center", letterSpacing: 3, fontSize: 14, fontWeight: 700, color: "#e6c87a", textShadow: "0 1px 2px #000", marginBottom: 14 }}>SELECT SERVER</div>
+            <select
+              value={selectedServer ?? ""}
+              onChange={(e) => setSelectedServer(Number(e.target.value))}
+              style={{ width: "100%", height: 26, background: "#0a0a08", border: "1px solid #5a4e32", color: "#e6dcc0", fontFamily: "Tahoma, sans-serif", fontSize: 12, padding: "0 6px", outline: "none" }}
+            >
+              {servers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {`#${s.id}  ${s.ip}:${s.port}  ·  ${s.currentPlayers}/${s.maxPlayers}`}
+                </option>
+              ))}
+            </select>
+            {error && <div style={{ marginTop: 8, fontSize: 11, color: "#e06a6a", textAlign: "center" }}>{error}</div>}
+            <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 14 }}>
+              <L2Button onClick={onEnterWorld} disabled={busy || selectedServer == null} variant="large" width={120}>{busy ? "…" : "OK"}</L2Button>
+              <L2Button onClick={cancelServerSelect} disabled={busy} width={90}>Cancel</L2Button>
             </div>
-            {error && (
-              <div className="text-[10px] text-blood bg-blood/10 border border-blood/40 rounded px-2 py-1 font-mono text-center">
-                {error}
-              </div>
-            )}
-          </form>
-        ) : (
-          <div className="l2-frame rounded px-4 py-3 w-[420px] space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="l2-button" style={{ minWidth: "5rem", pointerEvents: "none" }}>Server</span>
-              <select
-                value={selectedServer ?? ""}
-                onChange={(e) => setSelectedServer(Number(e.target.value))}
-                className="l2-input flex-1 appearance-none"
-                style={{ textAlignLast: "center" }}
-              >
-                {servers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {`#${s.id}  ${s.ip}:${s.port}  ·  ${s.currentPlayers}/${s.maxPlayers}`}
-                  </option>
-                ))}
-              </select>
-              <span className="text-[10px] text-gold tracking-widest px-2">L2SLAVE</span>
-              <span className="text-[10px] text-muted-foreground tracking-widest">Light</span>
-            </div>
-            <div className="flex justify-center gap-2 pt-1">
-              <button onClick={onEnterWorld} disabled={busy || selectedServer == null} className="l2-button">
-                {busy ? "…" : "OK"}
-              </button>
-              <button onClick={cancelServerSelect} disabled={busy} className="l2-button">Cancel</button>
-            </div>
-            {error && (
-              <div className="text-[10px] text-blood bg-blood/10 border border-blood/40 rounded px-2 py-1 font-mono text-center">
-                {error}
-              </div>
-            )}
-          </div>
-        )}
+          </L2Frame>
+        </div>
+      )}
+
+      {/* Bottom-right corner links (always visible) */}
+      <div style={{ position: "fixed", right: 14, bottom: 36, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, zIndex: 50, fontFamily: "Tahoma, sans-serif", fontSize: 11 }}>
+        <a href="https://l2.slave.gr/register" target="_blank" rel="noreferrer" className="l2-corner-link">New Account ↗</a>
+        <a href="http://l2.slave.gr/forgot-password" target="_blank" rel="noreferrer" className="l2-corner-link">Lost Account ↗</a>
+        <a href="https://l2.slave.gr" target="_blank" rel="noreferrer" className="l2-corner-link">Links ↗</a>
+        <Link to="/cdn-cache" className="l2-corner-link">Settings ↗</Link>
       </div>
 
-      {/* Bottom-right corner links */}
-      <div className="absolute bottom-12 right-6 flex flex-col items-end gap-1 text-right pointer-events-auto">
-        <a href="https://l2.slave.gr/register" target="_blank" rel="noreferrer" className="l2-corner-link">New Account <span className="opacity-60">↗</span></a>
-        <a href="http://l2.slave.gr/forgot-password" target="_blank" rel="noreferrer" className="l2-corner-link">Lost Account <span className="opacity-60">↗</span></a>
-        <a href="https://l2.slave.gr" target="_blank" rel="noreferrer" className="l2-corner-link">Links <span className="opacity-60">↗</span></a>
-        <Link to="/cdn-cache" className="l2-corner-link">Settings <span className="opacity-60">↗</span></Link>
-        <button
-          type="button"
-          onClick={async () => {
-            try {
-              if ("caches" in window) {
-                const keys = await caches.keys();
-                await Promise.all(keys.map((k) => caches.delete(k)));
-              }
-              if ("serviceWorker" in navigator) {
-                const regs = await navigator.serviceWorker.getRegistrations();
-                await Promise.all(regs.map((r) => r.unregister()));
-              }
-              try { sessionStorage.clear(); } catch { /* ignore */ }
-            } catch { /* ignore */ }
-            const url = new URL(window.location.href);
-            url.searchParams.set("_t", Date.now().toString());
-            window.location.replace(url.toString());
-          }}
-          className="l2-corner-link"
-          title="Clear cache and reload"
-        >
-          Update <span className="opacity-60">⟳</span>
-        </button>
-      </div>
-
-
-      {/* Bottom-left protocol log */}
       {statusLog.length > 0 && (
-        <details className="absolute bottom-12 left-3 max-w-md l2-frame rounded px-3 py-2 text-[10px] font-mono text-muted-foreground">
-          <summary className="cursor-pointer hover:text-gold tracking-widest">PROTOCOL LOG ({statusLog.length})</summary>
-          <pre className="mt-2 max-h-56 max-w-md overflow-auto whitespace-pre-wrap break-words leading-relaxed">
-            {statusLog.join("\n")}
-          </pre>
+        <details className="l2-frame" style={{ position: "fixed", bottom: 36, left: 12, maxWidth: 420, padding: "6px 10px", fontSize: 10, fontFamily: "monospace", color: "#9a9078", zIndex: 50 }}>
+          <summary style={{ cursor: "pointer", letterSpacing: 2 }}>PROTOCOL LOG ({statusLog.length})</summary>
+          <pre style={{ marginTop: 6, maxHeight: 200, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{statusLog.join("\n")}</pre>
         </details>
       )}
 
-      {/* Footer bar */}
       <div className="l2-footer">
         <span className="font-display tracking-[0.3em] text-gold/80">L2</span>
         <span className="sep">|</span>
         <span className="font-display tracking-[0.4em] text-foreground/80">L2SLAVE</span>
         <span className="sep">|</span>
-        <a href="https://l2.slave.gr" target="_blank" rel="noreferrer" className="hover:text-gold transition pointer-events-auto">l2.slave.gr</a>
+        <a href="https://l2.slave.gr" target="_blank" rel="noreferrer">l2.slave.gr</a>
         <span className="sep">·</span>
         <span>Unofficial web client</span>
       </div>
-
-    </div>
+    </SpriteProvider>
   );
 }
