@@ -1,4 +1,4 @@
-import { L2Package, type RefTarget, type UExport } from "./l2-package";
+import { L2Package, type MapPlacement, type RefTarget, type UExport } from "./l2-package";
 
 const RF_HAS_STACK = 0x02000000;
 
@@ -84,6 +84,18 @@ export interface UnrealPackageObjectIndex {
   exports: UnrealExportIndexEntry[];
 }
 
+export interface IndexedMapPlacement extends MapPlacement {
+  exportIndex: number;
+  actorName: string;
+  actorClass: string;
+  hidden: boolean;
+  deleteMe: boolean;
+  collideActors: boolean;
+  blockActors: boolean;
+  blockPlayers: boolean;
+  rawProperties: UnrealProperty[];
+}
+
 interface Cursor {
   o: number;
 }
@@ -123,13 +135,59 @@ export function buildObjectIndex(pkg: L2Package, opts: { includeClasses?: string
   };
 }
 
+export function readIndexedMapPlacements(
+  pkg: L2Package,
+  classes = ["StaticMeshActor", "MovableStaticMeshActor", "L2MovableStaticMeshActor"],
+): IndexedMapPlacement[] {
+  const wanted = new Set(classes);
+  const placements: IndexedMapPlacement[] = [];
+
+  pkg.exports.forEach((exp, i) => {
+    if (exp.size <= 0 || !wanted.has(exp.className)) return;
+    const properties = readExportProperties(pkg, exp);
+    const props = propsByName(properties);
+    const loc = tupleProp(props, "Location", 3);
+    const meshRef = objectProp(props, "StaticMesh");
+    if (!loc || !meshRef) return;
+
+    const mesh = resolveMeshRef(meshRef);
+    if (!mesh.name) return;
+    const rot = tupleProp(props, "Rotation", 3) ?? [0, 0, 0];
+    const s3 = tupleProp(props, "DrawScale3D", 3) ?? [1, 1, 1];
+    const TWO_PI_OVER_65536 = (Math.PI * 2) / 65536;
+
+    placements.push({
+      exportIndex: i + 1,
+      actorName: exp.objectName,
+      actorClass: exp.className,
+      x: loc[0],
+      y: loc[1],
+      z: loc[2],
+      pitch: rot[0] * TWO_PI_OVER_65536,
+      yaw: rot[1] * TWO_PI_OVER_65536,
+      roll: rot[2] * TWO_PI_OVER_65536,
+      scale: numberProp(props, "DrawScale") ?? 1,
+      scale3d: [s3[0], s3[1], s3[2]],
+      mesh: mesh.name,
+      pkg: mesh.pkg,
+      hidden: boolProp(props, "bHidden", "Hidden"),
+      deleteMe: boolProp(props, "bDeleteMe", "DeleteMe"),
+      collideActors: boolProp(props, "bCollideActors", "CollideActors"),
+      blockActors: boolProp(props, "bBlockActors", "BlockActors"),
+      blockPlayers: boolProp(props, "bBlockPlayers", "BlockPlayers"),
+      rawProperties: properties,
+    });
+  });
+
+  return placements;
+}
+
 export function readExportProperties(
   pkg: L2Package,
   exp: UExport,
   opts: { maxProperties?: number } = {},
 ): UnrealProperty[] {
   if (exp.size <= 0) return [];
-  const b = pkg.bytes;
   const cur: Cursor = { o: exp.offset };
   const end = exp.offset + exp.size;
 
@@ -259,6 +317,39 @@ function readPropertySize(pkg: L2Package, cur: Cursor, sizeCode: number): number
   if (sizeCode === 0x60) return readU16(pkg, cur);
   if (sizeCode === 0x70) return readU32(pkg, cur);
   return 0;
+}
+
+function propsByName(properties: UnrealProperty[]): Map<string, UnrealProperty> {
+  const out = new Map<string, UnrealProperty>();
+  for (const prop of properties) if (!out.has(prop.name)) out.set(prop.name, prop);
+  return out;
+}
+
+function tupleProp(props: Map<string, UnrealProperty>, name: string, count: number): number[] | null {
+  const value = props.get(name)?.value;
+  return Array.isArray(value) && value.length >= count && value.every((v) => typeof v === "number")
+    ? (value as number[]).slice(0, count)
+    : null;
+}
+
+function numberProp(props: Map<string, UnrealProperty>, name: string): number | null {
+  const value = props.get(name)?.value;
+  return typeof value === "number" ? value : null;
+}
+
+function objectProp(props: Map<string, UnrealProperty>, name: string): UnrealObjectRef | null {
+  const value = props.get(name)?.value;
+  return value && typeof value === "object" && "index" in value && "target" in value ? value : null;
+}
+
+function boolProp(props: Map<string, UnrealProperty>, ...names: string[]): boolean {
+  return names.some((name) => props.get(name)?.value === true);
+}
+
+function resolveMeshRef(ref: UnrealObjectRef): { name: string; pkg: string } {
+  if (ref.target.kind === "import") return { name: ref.target.name, pkg: ref.target.pkg };
+  if (ref.target.kind === "export") return { name: ref.target.name, pkg: "(this)" };
+  return { name: "", pkg: "" };
 }
 
 function collectRefs(value: UnrealPropertyValue): UnrealObjectRef[] {
