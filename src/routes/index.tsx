@@ -4,8 +4,8 @@ import { L2LoginClient, type GameServer, type LoginEvent } from "@/lib/l2-protoc
 import { L2GameClient, setGameConnection, type GameEvent } from "@/lib/l2-protocol/game-client";
 import { SpriteProvider } from "@/components/hud/L2Sprite";
 import { L2LoginScreen } from "@/components/hud/L2LoginScreen";
-const serverSelect = { url: "/hud/screens/LogonScreen.png" };
 
+const serverSelect = { url: "/hud/screens/LogonScreen.png" };
 const GAME_PROTOCOL = 502;
 
 export const Route = createFileRoute("/")({
@@ -29,6 +29,7 @@ function Launcher() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusLog, setStatusLog] = useState<string[]>([]);
+  const loginRef = useRef<L2LoginClient | null>(null);
 
   useEffect(() => {
     try {
@@ -51,8 +52,6 @@ function Launcher() {
     });
   }
 
-  const loginRef = useRef<L2LoginClient | null>(null);
-
   async function doLogin(id: string, pw: string) {
     setUsername(id);
     setError(null);
@@ -64,12 +63,11 @@ function Launcher() {
       /* ignore */
     }
     setBusy(true);
-    const host = "l2server.slave.gr";
-    const port = 2106;
+
     try {
       const client = new L2LoginClient({
-        host,
-        port,
+        host: "l2server.slave.gr",
+        port: 2106,
         username: id,
         password: pw,
         onEvent: (ev: LoginEvent) => {
@@ -78,9 +76,7 @@ function Launcher() {
           else if (ev.type === "gg-ok") pushStatus("GameGuard OK");
           else if (ev.type === "login-ok") pushStatus("LoginOk — requesting server list");
           else if (ev.type === "raw")
-            pushStatus(
-              `← opcode 0x${ev.opcode.toString(16).padStart(2, "0")} (${ev.bytes.length}B)`,
-            );
+            pushStatus(`← opcode 0x${ev.opcode.toString(16).padStart(2, "0")} (${ev.bytes.length}B)`);
         },
       });
       loginRef.current = client;
@@ -118,17 +114,17 @@ function Launcher() {
       setPhase("login");
       return;
     }
+
     setBusy(true);
     setError(null);
     try {
       pushStatus(`Requesting PlayOk for server #${server.id}…`);
       const playEv = await login.selectServer(server.id);
       if (playEv.type !== "play-ok") {
-        setError(
-          playEv.type === "login-fail" ? `PlayOk failed: ${playEv.reason}` : "PlayOk failed",
-        );
+        setError(playEv.type === "login-fail" ? `PlayOk failed: ${playEv.reason}` : "PlayOk failed");
         return;
       }
+
       const [p1, p2] = playEv.playKey;
       const [k1, k2] = login.loginSessionKey;
       login.close();
@@ -169,7 +165,7 @@ function Launcher() {
   return (
     <SpriteProvider>
       {phase === "login" ? (
-        <L2LoginScreen onLogin={doLogin} busy={busy} error={error} />
+        <L2LoginScreen onLogin={doLogin} busy={busy} error={error} statusLog={statusLog} />
       ) : (
         <div style={{ position: "fixed", inset: 0, background: "#000", overflow: "hidden" }}>
           <div
@@ -191,8 +187,7 @@ function Launcher() {
                 transform: "translate(-50%, -50%)",
                 width: "min(440px, 70%)",
                 padding: "22px 26px",
-                background:
-                  "linear-gradient(to bottom, rgba(28,24,16,0.96), rgba(10,8,6,0.96))",
+                background: "linear-gradient(to bottom, rgba(28,24,16,0.96), rgba(10,8,6,0.96))",
                 border: "1px solid rgba(204,180,120,0.55)",
                 borderRadius: 4,
                 boxShadow: "0 10px 30px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,235,180,0.15)",
@@ -256,8 +251,7 @@ function Launcher() {
                   disabled={busy || selectedServer == null}
                   style={{
                     padding: "8px 22px",
-                    background:
-                      "linear-gradient(to bottom, rgba(107,98,74,0.94), rgba(43,39,30,0.98))",
+                    background: "linear-gradient(to bottom, rgba(107,98,74,0.94), rgba(43,39,30,0.98))",
                     border: "1px solid rgba(230,215,156,0.7)",
                     borderRadius: 3,
                     color: "#fff",
@@ -275,8 +269,7 @@ function Launcher() {
                   disabled={busy}
                   style={{
                     padding: "8px 22px",
-                    background:
-                      "linear-gradient(to bottom, rgba(80,72,52,0.9), rgba(30,26,20,0.96))",
+                    background: "linear-gradient(to bottom, rgba(80,72,52,0.9), rgba(30,26,20,0.96))",
                     border: "1px solid rgba(180,160,110,0.55)",
                     borderRadius: 3,
                     color: "#e4dcc2",
@@ -288,7 +281,7 @@ function Launcher() {
                   Cancel
                 </button>
               </div>
-              {error && (
+              {error ? (
                 <div
                   style={{
                     marginTop: 12,
@@ -300,7 +293,7 @@ function Launcher() {
                 >
                   {error}
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
