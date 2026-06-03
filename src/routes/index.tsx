@@ -256,7 +256,7 @@ function Launcher() {
                           fontWeight: active ? 700 : 400,
                         }}
                       >
-                        {s.name || `Server #${s.id}`}
+                        {`L2-${s.ip}:${s.port}`}
                       </button>
                     );
                   })
