@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { listFiles, getManifest, getCacheStats, getFile, formatBytes, type CachedFileMeta } from "@/lib/l2-assets";
 import { readFromMount } from "@/lib/local-mount";
 import { L2Package } from "@/lib/l2-package";
+import { loadMap } from "@/lib/map-loader";
 import { getGameConnection, type GameEvent, type WorldEntity } from "@/lib/l2-protocol/game-client";
 
 /**
@@ -265,40 +266,65 @@ export function WorldViewport() {
 
       if (actors.length === 0) return;
 
-      // Center the placement cloud on its centroid.
-      const cx = actors.reduce((s, a) => s + a.x, 0) / actors.length;
-      const cy = actors.reduce((s, a) => s + a.y, 0) / actors.length;
-      const cz = actors.reduce((s, a) => s + a.z, 0) / actors.length;
-
-      mapGroup = new THREE.Group();
-      const geo = new THREE.BoxGeometry(2, 4, 2);
-      const mat = new THREE.MeshStandardMaterial({ color: 0x8a8170, roughness: 0.85 });
-      const inst = new THREE.InstancedMesh(geo, mat, actors.length);
-      const m = new THREE.Matrix4();
-      actors.forEach((a, i) => {
-        // L2 (x east, y north, z up) → three (x, y up, z)
-        m.makeTranslation((a.x - cx) / SCALE, (a.z - cz) / SCALE, (a.y - cy) / SCALE);
-        inst.setMatrixAt(i, m);
-      });
-      inst.instanceMatrix.needsUpdate = true;
-      mapGroup.add(inst);
-      mapDisposables.push(geo, mat);
-
-      // Spawn markers (green)
-      if (spawns.length) {
-        const sg = new THREE.ConeGeometry(1.2, 3, 6);
-        const sm = new THREE.MeshStandardMaterial({ color: 0x3fdc6a, emissive: 0x114420 });
-        const sInst = new THREE.InstancedMesh(sg, sm, spawns.length);
-        spawns.forEach((a, i) => {
-          m.makeTranslation((a.x - cx) / SCALE, (a.z - cz) / SCALE + 1.5, (a.y - cy) / SCALE);
-          sInst.setMatrixAt(i, m);
-        });
-        sInst.instanceMatrix.needsUpdate = true;
-        mapGroup.add(sInst);
-        mapDisposables.push(sg, sm);
+      // Phase 3: assemble REAL meshes from .usx packages.
+      // Pull each StaticMeshActor.StaticMesh ref and resolve to the matching .usx.
+      const bytesForPath = async (path: string): Promise<ArrayBuffer | null> => {
+        try {
+          const b = (await getFile(path)) ?? (await readFromMount(path));
+          return b ? (b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer) : null;
+        } catch {
+          return null;
+        }
+      };
+      const meshFolder = (await listFiles("staticmeshes").catch(() => [])) as CachedFileMeta[];
+      const meshIndex = new Map<string, string>(); // lower(basename) → path
+      for (const f of meshFolder) {
+        const base = f.path.split("/").pop()!.replace(/\.usx$/i, "").toLowerCase();
+        meshIndex.set(base, f.path);
       }
 
-      scene.add(mapGroup);
+      const unrBytes = (await getFile(pickedPath)) ?? (await readFromMount(pickedPath));
+      if (!unrBytes) { setLoadStatus("Map file vanished from cache."); return; }
+
+      try {
+        mapGroup = await loadMap(
+          unrBytes.buffer.slice(unrBytes.byteOffset, unrBytes.byteOffset + unrBytes.byteLength) as ArrayBuffer,
+          async (pkgName) => {
+            const path = meshIndex.get(pkgName.toLowerCase()) ?? `staticmeshes/${pkgName}.usx`;
+            return await bytesForPath(path);
+          },
+          {
+            scale: SCALE,
+            onProgress: (msg) => {
+              console.log(msg);
+              setLoadStatus(msg);
+            },
+          },
+        );
+        scene.add(mapGroup);
+        setLoadStatus(`${pickedPath} · meshes assembled`);
+      } catch (err) {
+        console.error("[map] assemble failed, falling back to markers", err);
+        // Fallback: spawn markers only so the player still sees something.
+        const cx = actors.reduce((s, a) => s + a.x, 0) / actors.length;
+        const cy = actors.reduce((s, a) => s + a.y, 0) / actors.length;
+        const cz = actors.reduce((s, a) => s + a.z, 0) / actors.length;
+        mapGroup = new THREE.Group();
+        if (spawns.length) {
+          const sg = new THREE.ConeGeometry(1.2, 3, 6);
+          const sm = new THREE.MeshStandardMaterial({ color: 0x3fdc6a, emissive: 0x114420 });
+          const sInst = new THREE.InstancedMesh(sg, sm, spawns.length);
+          const m = new THREE.Matrix4();
+          spawns.forEach((a, i) => {
+            m.makeTranslation((a.x - cx) / SCALE, (a.z - cz) / SCALE + 1.5, (a.y - cy) / SCALE);
+            sInst.setMatrixAt(i, m);
+          });
+          sInst.instanceMatrix.needsUpdate = true;
+          mapGroup.add(sInst);
+          mapDisposables.push(sg, sm);
+        }
+        scene.add(mapGroup);
+      }
     })().catch((err) => {
       console.error("[map] loader failed", err);
       setLoadStatus(`Map load failed: ${(err as Error).message}`);
