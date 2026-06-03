@@ -295,10 +295,12 @@ export function L2HudMockup({
   onExit,
   activeChar,
   chatLines = [],
+  onSendChat,
 }: {
   onExit?: () => void;
   activeChar?: HudActiveChar;
   chatLines?: HudChatLine[];
+  onSendChat?: (text: string) => void;
 }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [order, setOrder] = useState<string[]>([]);
