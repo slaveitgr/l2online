@@ -187,15 +187,65 @@ function Launcher() {
               value={selectedServer ?? ""}
               onChange={(e) => setSelectedServer(Number(e.target.value))}
               aria-label="Server"
-              style={{ position: "absolute", left: "34.5%", top: "75.5%", width: "31%", height: "3.9%", opacity: 0.01 }}
+              style={{
+                position: "absolute",
+                left: "34.5%",
+                top: "75.5%",
+                width: "31%",
+                height: "3.9%",
+                opacity: 0.01,
+              }}
             >
               {servers.map((s) => (
                 <option key={s.id} value={s.id}>{`#${s.id} ${s.ip}:${s.port}`}</option>
               ))}
             </select>
-            <button aria-label="OK" onClick={onEnterWorld} disabled={busy || selectedServer == null} style={{ position: "absolute", left: "43.2%", top: "80.8%", width: "6.6%", height: "3.3%", opacity: 0, border: 0, cursor: "pointer" }} />
-            <button aria-label="Cancel" onClick={cancelServerSelect} disabled={busy} style={{ position: "absolute", left: "50.2%", top: "80.8%", width: "6.5%", height: "3.3%", opacity: 0, border: 0, cursor: "pointer" }} />
-            {error && <div style={{ position: "absolute", left: "50%", top: "85%", transform: "translateX(-50%)", fontSize: 11, color: "#ff8c8c", textAlign: "center", textShadow: "0 1px 2px #000" }}>{error}</div>}
+            <button
+              aria-label="OK"
+              onClick={onEnterWorld}
+              disabled={busy || selectedServer == null}
+              style={{
+                position: "absolute",
+                left: "43.2%",
+                top: "80.8%",
+                width: "6.6%",
+                height: "3.3%",
+                opacity: 0,
+                border: 0,
+                cursor: "pointer",
+              }}
+            />
+            <button
+              aria-label="Cancel"
+              onClick={cancelServerSelect}
+              disabled={busy}
+              style={{
+                position: "absolute",
+                left: "50.2%",
+                top: "80.8%",
+                width: "6.5%",
+                height: "3.3%",
+                opacity: 0,
+                border: 0,
+                cursor: "pointer",
+              }}
+            />
+            {error && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: "50%",
+                  top: "85%",
+                  transform: "translateX(-50%)",
+                  fontSize: 11,
+                  color: "#ff8c8c",
+                  textAlign: "center",
+                  textShadow: "0 1px 2px #000",
+                }}
+              >
+                {error}
+              </div>
+            )}
           </div>
         </div>
       )}

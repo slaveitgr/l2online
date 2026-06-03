@@ -35,7 +35,15 @@ export function L2CharSelectScreen({
   const cur = characters[selected] ?? null;
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#000", overflow: "hidden", fontFamily: "Tahoma, Geneva, sans-serif" }}>
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "#000",
+        overflow: "hidden",
+        fontFamily: "Tahoma, Geneva, sans-serif",
+      }}
+    >
       <div
         style={{
           position: "absolute",
@@ -66,11 +74,83 @@ export function L2CharSelectScreen({
             }}
           />
         ))}
-        <button type="button" aria-label="Credits" onClick={() => onBack?.()} style={{ position: "absolute", left: "0.3%", bottom: "4.1%", width: "5.4%", height: "2.4%", opacity: 0, border: 0, cursor: "pointer" }} />
-        <button type="button" aria-label="Exit" onClick={() => onBack?.()} style={{ position: "absolute", left: "0.3%", bottom: "0.8%", width: "5.4%", height: "2.4%", opacity: 0, border: 0, cursor: "pointer" }} />
-        <button type="button" aria-label="Play" disabled={!cur} onClick={() => cur && onStart?.(selected)} style={{ position: "absolute", left: "47.2%", bottom: "0.8%", width: "5.8%", height: "2.6%", opacity: 0, border: 0, cursor: cur ? "pointer" : "default" }} />
-        <button type="button" aria-label="Create" onClick={() => onCreate?.()} style={{ position: "absolute", right: "7.3%", bottom: "1%", width: "5.4%", height: "2.4%", opacity: 0, border: 0, cursor: "pointer" }} />
-        <button type="button" aria-label="Delete" disabled={!cur} onClick={() => cur && onDelete?.(selected)} style={{ position: "absolute", right: "1.8%", bottom: "1%", width: "5.2%", height: "2.4%", opacity: 0, border: 0, cursor: cur ? "pointer" : "default" }} />
+        <button
+          type="button"
+          aria-label="Credits"
+          onClick={() => onBack?.()}
+          style={{
+            position: "absolute",
+            left: "0.3%",
+            bottom: "4.1%",
+            width: "5.4%",
+            height: "2.4%",
+            opacity: 0,
+            border: 0,
+            cursor: "pointer",
+          }}
+        />
+        <button
+          type="button"
+          aria-label="Exit"
+          onClick={() => onBack?.()}
+          style={{
+            position: "absolute",
+            left: "0.3%",
+            bottom: "0.8%",
+            width: "5.4%",
+            height: "2.4%",
+            opacity: 0,
+            border: 0,
+            cursor: "pointer",
+          }}
+        />
+        <button
+          type="button"
+          aria-label="Play"
+          disabled={!cur}
+          onClick={() => cur && onStart?.(selected)}
+          style={{
+            position: "absolute",
+            left: "47.2%",
+            bottom: "0.8%",
+            width: "5.8%",
+            height: "2.6%",
+            opacity: 0,
+            border: 0,
+            cursor: cur ? "pointer" : "default",
+          }}
+        />
+        <button
+          type="button"
+          aria-label="Create"
+          onClick={() => onCreate?.()}
+          style={{
+            position: "absolute",
+            right: "7.3%",
+            bottom: "1%",
+            width: "5.4%",
+            height: "2.4%",
+            opacity: 0,
+            border: 0,
+            cursor: "pointer",
+          }}
+        />
+        <button
+          type="button"
+          aria-label="Delete"
+          disabled={!cur}
+          onClick={() => cur && onDelete?.(selected)}
+          style={{
+            position: "absolute",
+            right: "1.8%",
+            bottom: "1%",
+            width: "5.2%",
+            height: "2.4%",
+            opacity: 0,
+            border: 0,
+            cursor: cur ? "pointer" : "default",
+          }}
+        />
       </div>
     </div>
   );
