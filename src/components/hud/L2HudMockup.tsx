@@ -185,8 +185,25 @@ function StatusBox({ char }: { char: HudActiveChar }) {
   );
 }
 
-function ChatLog({ lines }: { lines: HudChatLine[] }) {
-  if (lines.length === 0) return null;
+function ChatLog({
+  lines,
+  onSend,
+}: {
+  lines: HudChatLine[];
+  onSend?: (text: string) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [draft, setDraft] = useState("");
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [lines.length]);
+  const submit = () => {
+    const t = draft.trim();
+    if (!t) return;
+    onSend?.(t);
+    setDraft("");
+  };
   return (
     <div
       style={{
@@ -194,24 +211,82 @@ function ChatLog({ lines }: { lines: HudChatLine[] }) {
         left: 14,
         top: 686,
         width: 372,
-        height: 250,
-        overflow: "hidden",
+        height: 330,
         display: "flex",
         flexDirection: "column",
-        justifyContent: "flex-end",
-        gap: 2,
         fontFamily: "Tahoma, Geneva, sans-serif",
         fontSize: 12,
         textShadow: "0 1px 1px #000",
-        zIndex: 5,
-        pointerEvents: "none",
+        zIndex: 6,
       }}
     >
-      {lines.slice(-12).map((l, i) => (
-        <div key={i} style={{ color: l.color ?? "#d8d2bd" }}>
-          {l.text}
-        </div>
-      ))}
+      <div
+        ref={scrollRef}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          padding: "4px 6px",
+          background: "rgba(0,0,0,0.35)",
+          border: "1px solid rgba(80,68,40,0.5)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+          pointerEvents: "auto",
+        }}
+      >
+        {lines.length === 0 ? (
+          <div style={{ color: "#807660", fontStyle: "italic" }}>No messages yet…</div>
+        ) : (
+          lines.map((l, i) => (
+            <div key={i} style={{ color: l.color ?? "#d8d2bd", wordBreak: "break-word" }}>
+              {l.text}
+            </div>
+          ))
+        )}
+      </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+        style={{ display: "flex", marginTop: 4 }}
+      >
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Type a message and press Enter…"
+          maxLength={255}
+          style={{
+            flex: 1,
+            padding: "6px 8px",
+            background: "rgba(0,0,0,0.65)",
+            border: "1px solid #5a4a28",
+            color: "#f6ecc8",
+            fontSize: 12,
+            outline: "none",
+            pointerEvents: "auto",
+          }}
+        />
+        <button
+          type="submit"
+          disabled={!draft.trim() || !onSend}
+          style={{
+            marginLeft: 4,
+            padding: "6px 12px",
+            background: "linear-gradient(180deg,#3a3424,#1f1a10)",
+            color: "#f6ecc8",
+            border: "1px solid #5a4a28",
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: 1,
+            cursor: !draft.trim() || !onSend ? "default" : "pointer",
+            pointerEvents: "auto",
+          }}
+        >
+          SEND
+        </button>
+      </form>
     </div>
   );
 }
@@ -220,10 +295,12 @@ export function L2HudMockup({
   onExit,
   activeChar,
   chatLines = [],
+  onSendChat,
 }: {
   onExit?: () => void;
   activeChar?: HudActiveChar;
   chatLines?: HudChatLine[];
+  onSendChat?: (text: string) => void;
 }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [order, setOrder] = useState<string[]>([]);
@@ -325,7 +402,7 @@ export function L2HudMockup({
         />
 
         {activeChar ? <StatusBox char={activeChar} /> : null}
-        <ChatLog lines={chatLines} />
+        <ChatLog lines={chatLines} onSend={onSendChat} />
 
 
 

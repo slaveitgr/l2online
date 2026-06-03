@@ -179,7 +179,111 @@ export function L2CharSelectScreen({
             />
           );
         })}
+
+        {/* Always-on visible action bar — guarantees Play/Create/Delete/Exit are clickable */}
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            bottom: "1.5%",
+            transform: "translateX(-50%)",
+            display: "flex",
+            gap: 8,
+            zIndex: 20,
+            fontFamily: "Tahoma, Geneva, sans-serif",
+          }}
+        >
+          <ActionBtn label="Play" disabled={!cur} onClick={() => cur && onStart?.(selected)} primary />
+          <ActionBtn label="Create" onClick={() => onCreate?.()} />
+          <ActionBtn label="Delete" disabled={!cur} onClick={() => cur && onDelete?.(selected)} />
+          <ActionBtn label="Exit" onClick={() => onBack?.()} />
+        </div>
+
+        {/* Character roster fallback — clickable list of real characters */}
+        {characters.length > 0 && (
+          <div
+            style={{
+              position: "absolute",
+              right: "1%",
+              top: "16%",
+              width: "18%",
+              maxHeight: "70%",
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              zIndex: 20,
+              fontFamily: "Tahoma, Geneva, sans-serif",
+            }}
+          >
+            {characters.map((c, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => onSelect?.(i)}
+                onDoubleClick={() => onStart?.(i)}
+                style={{
+                  textAlign: "left",
+                  padding: "6px 8px",
+                  background: i === selected ? "rgba(120,90,40,0.8)" : "rgba(0,0,0,0.55)",
+                  border: `1px solid ${i === selected ? "#c9a04a" : "#3a3220"}`,
+                  color: "#e6dcc0",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  textShadow: "0 1px 1px #000",
+                }}
+              >
+                <div style={{ fontWeight: 700 }}>
+                  Lv {c.level} {c.name}
+                </div>
+                {c.className && (
+                  <div style={{ fontSize: 10, color: "#9c906f" }}>{c.className}</div>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
       </section>
     </div>
+  );
+}
+
+function ActionBtn({
+  label,
+  onClick,
+  disabled,
+  primary,
+}: {
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  primary?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        minWidth: 88,
+        padding: "8px 14px",
+        background: disabled
+          ? "linear-gradient(180deg,#2a2620,#1a1612)"
+          : primary
+            ? "linear-gradient(180deg,#d8b25a,#8a6a20)"
+            : "linear-gradient(180deg,#3a3424,#1f1a10)",
+        color: disabled ? "#6a6258" : "#f6ecc8",
+        border: `1px solid ${primary ? "#e6c87a" : "#5a4a28"}`,
+        fontSize: 13,
+        fontWeight: 700,
+        letterSpacing: 1,
+        textTransform: "uppercase",
+        cursor: disabled ? "default" : "pointer",
+        textShadow: "0 1px 1px #000",
+        boxShadow: "0 2px 6px rgba(0,0,0,0.55)",
+      }}
+    >
+      {label}
+    </button>
   );
 }
