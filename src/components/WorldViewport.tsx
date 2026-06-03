@@ -46,8 +46,9 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
 
     // ── Scene ────────────────────────────────────────────────────────────
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a0f0a);
-    scene.fog = new THREE.FogExp2(0x2a1a14, 0.006);
+    // Daylight town atmosphere (was a dark red cast that tinted everything blue/black).
+    scene.background = new THREE.Color(0x9fb6d4);
+    scene.fog = new THREE.FogExp2(0xa8bcd6, 0.0016);
 
     const camera = new THREE.PerspectiveCamera(60, mount.clientWidth / mount.clientHeight, 0.1, 3000);
 
@@ -60,17 +61,19 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     renderer.toneMappingExposure = 1.1;
     mount.appendChild(renderer.domElement);
 
-    // ── Lighting ─────────────────────────────────────────────────────────
-    scene.add(new THREE.AmbientLight(0x442a1c, 0.7));
-    const sun = new THREE.DirectionalLight(0xffd28a, 1.2);
-    sun.position.set(80, 120, 40);
+    // ── Lighting (neutral daylight) ──────────────────────────────────────
+    // Sky/ground hemisphere lifts untextured surfaces without the old red/blue cast.
+    scene.add(new THREE.HemisphereLight(0xdce8f7, 0x6f6048, 1.15));
+    const sun = new THREE.DirectionalLight(0xfff3da, 1.55);
+    sun.position.set(120, 200, 90);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
-    Object.assign(sun.shadow.camera, { left: -150, right: 150, top: 150, bottom: -150 });
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.bias = -0.0004;
+    Object.assign(sun.shadow.camera, { left: -160, right: 160, top: 160, bottom: -160 });
     scene.add(sun);
-    const rim = new THREE.DirectionalLight(0x6080ff, 0.3);
-    rim.position.set(-50, 30, -50);
-    scene.add(rim);
+    const fill = new THREE.DirectionalLight(0xbfd2f0, 0.32);
+    fill.position.set(-90, 70, -60);
+    scene.add(fill);
 
     // ── Ground (placeholder heightmap) ───────────────────────────────────
     const terrainGeom = new THREE.PlaneGeometry(400, 400, 80, 80);
@@ -101,6 +104,13 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     const toScene = (wx: number, wy: number, wz: number) =>
       new THREE.Vector3((wx - origin.x) / SCALE, (wz - origin.z) / SCALE, -(wy - origin.y) / SCALE);
 
+    // Player scene position (smoothly chased toward the server-reported target).
+    const playerScenePos = new THREE.Vector3(0, 0, 0);
+    const playerTargetPos = new THREE.Vector3(0, 0, 0);
+    let playerYaw = 0;
+    let playerYawTarget = 0;
+    const FACE_OFFSET = Math.PI; // tune if the model faces away from travel direction
+
     // Player marker — a teal cone shown immediately, then replaced by the real
     // 3D character model once it loads (Phase: player avatar in-world).
     const playerMesh = new THREE.Mesh(
@@ -124,16 +134,23 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
           if (c.race) race = c.race;
           if (c.gender === "M" || c.sex === 0 || c.sex === "0") gender = "M";
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       loadCharacterModel(race, gender, { targetHeight: 3.4 })
         .then((handle) => {
-          if (!handle || playerModelDisposed) { handle?.dispose(); return; }
+          if (!handle || playerModelDisposed) {
+            handle?.dispose();
+            return;
+          }
           playerModel = handle;
           handle.group.position.set(0, 0, 0);
           scene.add(handle.group);
           scene.remove(playerMesh); // hide the placeholder cone
         })
-        .catch(() => {/* keep cone */});
+        .catch(() => {
+          /* keep cone */
+        });
     })();
 
     const playerRing = new THREE.Mesh(
@@ -144,9 +161,10 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     playerRing.position.y = 0.1;
     scene.add(playerRing);
 
-    // NPC markers (shared geometry/material)
-    const npcGeom = new THREE.ConeGeometry(0.8, 2.4, 6);
-    const npcMat = new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.6 });
+    // NPC / other-entity markers — a humanoid capsule (clearer than the old cone).
+    // (Full per-NPC .ukx models reuse the character pipeline — separate track.)
+    const npcGeom = new THREE.CapsuleGeometry(0.7, 2.0, 6, 12);
+    const npcMat = new THREE.MeshStandardMaterial({ color: 0xb5483a, roughness: 0.7 });
     const entityMeshes = new Map<number, THREE.Mesh>();
 
     const upsert = (e: WorldEntity) => {
@@ -159,7 +177,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         entityMeshes.set(e.objectId, m);
       }
       const p = toScene(e.x, e.y, e.z);
-      p.y += 1.2;
+      p.y += 1.7;
       m.position.copy(p);
     };
     const remove = (objectId: number) => {
@@ -174,15 +192,26 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     conn?.getEntities().forEach(upsert);
     setEntityCount(entityMeshes.size);
 
+    const setPlayerTarget = (wx: number, wy: number, wz: number) => {
+      const p = toScene(wx, wy, wz);
+      const dx = p.x - playerTargetPos.x;
+      const dz = p.z - playerTargetPos.z;
+      if (Math.hypot(dx, dz) > 0.05) playerYawTarget = Math.atan2(dx, dz) + FACE_OFFSET;
+      playerTargetPos.copy(p);
+    };
+
     const unsub = conn?.addListener((ev: GameEvent) => {
-      if (ev.type === "npc-spawn") {
+      if (ev.type === "player") {
+        const pl = ev.player as { x?: number; y?: number; z?: number };
+        if (typeof pl.x === "number") setPlayerTarget(pl.x, pl.y ?? 0, pl.z ?? 0);
+      } else if (ev.type === "npc-spawn") {
         upsert(ev.entity);
         setEntityCount(entityMeshes.size);
       } else if (ev.type === "npc-move") {
         const m = entityMeshes.get(ev.objectId);
         if (m) {
           const p = toScene(ev.x, ev.y, ev.z);
-          p.y += 1.2;
+          p.y += 1.7;
           m.position.copy(p);
         }
       } else if (ev.type === "npc-remove") {
@@ -199,10 +228,11 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     let lastX = 0;
     let lastY = 0;
     const updateCamera = () => {
-      camera.position.x = Math.sin(phi) * Math.cos(theta) * radius;
-      camera.position.z = Math.sin(phi) * Math.sin(theta) * radius;
-      camera.position.y = Math.cos(phi) * radius + 4;
-      camera.lookAt(0, 2, 0);
+      // third-person orbit centred on the player (who can now move)
+      camera.position.x = playerScenePos.x + Math.sin(phi) * Math.cos(theta) * radius;
+      camera.position.z = playerScenePos.z + Math.sin(phi) * Math.sin(theta) * radius;
+      camera.position.y = playerScenePos.y + Math.cos(phi) * radius + 4;
+      camera.lookAt(playerScenePos.x, playerScenePos.y + 2, playerScenePos.z);
     };
     updateCamera();
 
@@ -251,13 +281,20 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
           }
         }
         const groundHits = raycaster.intersectObject(terrain, false);
-        if (groundHits.length > 0 && onGroundTap) {
+        if (groundHits.length > 0) {
           const p = groundHits[0].point;
-          // scene → L2 world (inverse of toScene)
-          const wx = Math.round(p.x * SCALE + origin.x);
-          const wy = Math.round(-p.z * SCALE + origin.y);
-          const wz = Math.round(p.y * SCALE + origin.z);
-          onGroundTap(wx, wy, wz);
+          // optimistic local move so the character starts walking immediately
+          const dx = p.x - playerTargetPos.x;
+          const dz = p.z - playerTargetPos.z;
+          if (Math.hypot(dx, dz) > 0.05) playerYawTarget = Math.atan2(dx, dz) + FACE_OFFSET;
+          playerTargetPos.set(p.x, p.y, p.z);
+          if (onGroundTap) {
+            // scene → L2 world (inverse of toScene)
+            const wx = Math.round(p.x * SCALE + origin.x);
+            const wy = Math.round(-p.z * SCALE + origin.y);
+            const wz = Math.round(p.y * SCALE + origin.z);
+            onGroundTap(wx, wy, wz);
+          }
         }
       }
     };
@@ -284,6 +321,22 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     let raf = 0;
     const tick = () => {
       const t = performance.now() * 0.001;
+
+      // chase the player toward the server/click target + face travel direction
+      playerScenePos.lerp(playerTargetPos, 0.12);
+      let dy = playerYawTarget - playerYaw;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      playerYaw += dy * 0.18;
+
+      playerMesh.position.set(playerScenePos.x, playerScenePos.y + 1.7, playerScenePos.z);
+      playerRing.position.set(playerScenePos.x, playerScenePos.y + 0.1, playerScenePos.z);
+      if (playerModel) {
+        playerModel.group.position.copy(playerScenePos);
+        playerModel.group.rotation.y = playerYaw;
+      }
+      updateCamera();
+
       playerRing.scale.setScalar(1 + Math.sin(t * 3) * 0.04);
       renderer.render(scene, camera);
       frameCount++;
@@ -305,14 +358,16 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       setLoadStatus("Reading mounted/cached client…");
       const [manifest, stats] = await Promise.all([getManifest().catch(() => null), getCacheStats().catch(() => null)]);
       const rootName = manifest?.rootName ?? "CDN cache";
-      const [cachedMaps, mountedMaps, cachedTextures, mountedTextures, cachedMeshes, mountedMeshes] = await Promise.all([
-        listFiles("maps").catch(() => []),
-        listMountFiles("Maps").catch(() => []),
-        listFiles("textures").catch(() => []),
-        listMountFiles("Textures").catch(() => []),
-        listFiles("staticmeshes").catch(() => []),
-        listMountFiles("StaticMeshes").catch(() => []),
-      ]);
+      const [cachedMaps, mountedMaps, cachedTextures, mountedTextures, cachedMeshes, mountedMeshes] = await Promise.all(
+        [
+          listFiles("maps").catch(() => []),
+          listMountFiles("Maps").catch(() => []),
+          listFiles("textures").catch(() => []),
+          listMountFiles("Textures").catch(() => []),
+          listFiles("staticmeshes").catch(() => []),
+          listMountFiles("StaticMeshes").catch(() => []),
+        ],
+      );
       const mapPaths = new Set<string>();
       const maps = [...mountedMaps, ...cachedMaps].filter((m) => {
         const key = m.path.toLowerCase();
@@ -329,7 +384,13 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       else setLoadStatus("No cache found · checking mounted client folder…");
 
       // Try preferred sectors first, then any cached map. Mount → cache fallback.
-      const candidates = ["Maps/22_22.unr", "maps/22_22.unr", "Maps/17_25.unr", "maps/17_25.unr", ...maps.map((m) => m.path)];
+      const candidates = [
+        "Maps/22_22.unr",
+        "maps/22_22.unr",
+        "Maps/17_25.unr",
+        "maps/17_25.unr",
+        ...maps.map((m) => m.path),
+      ];
       let pkg: L2Package | null = null;
       let pickedPath = "";
       let unrBytes: Uint8Array | null = null;
@@ -337,7 +398,9 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         try {
           const bytes = (await readFromMount(path)) ?? (await getFile(path));
           if (!bytes) continue;
-          pkg = L2Package.from(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+          pkg = L2Package.from(
+            bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+          );
           pickedPath = path;
           unrBytes = bytes;
           break;
@@ -345,7 +408,10 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
           console.warn("[map] failed to parse", path, err);
         }
       }
-      if (!pkg || !unrBytes) { setLoadStatus("No parsable .unr available (mount or cache)."); return; }
+      if (!pkg || !unrBytes) {
+        setLoadStatus("No parsable .unr available (mount or cache).");
+        return;
+      }
 
       const actors = pkg.readActorPlacements();
       const spawns = pkg.readActorPlacements(["PlayerStart"]);
@@ -367,7 +433,11 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       const meshFolder = [...mountedMeshes, ...cachedMeshes] as CachedFileMeta[];
       const meshIndex = new Map<string, string>(); // lower(basename) → path
       for (const f of meshFolder) {
-        const base = f.path.split("/").pop()!.replace(/\.usx$/i, "").toLowerCase();
+        const base = f.path
+          .split("/")
+          .pop()!
+          .replace(/\.usx$/i, "")
+          .toLowerCase();
         meshIndex.set(base, f.path);
       }
 
@@ -441,7 +511,10 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       entityMeshes.forEach((m) => scene.remove(m));
       entityMeshes.clear();
       playerModelDisposed = true;
-      if (playerModel) { scene.remove(playerModel.group); playerModel.dispose(); }
+      if (playerModel) {
+        scene.remove(playerModel.group);
+        playerModel.dispose();
+      }
       if (mapGroup) scene.remove(mapGroup);
       mapDisposables.forEach((d) => d.dispose());
       mount.removeChild(renderer.domElement);
