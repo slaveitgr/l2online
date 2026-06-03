@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorldRouteImport } from './routes/world'
 import { Route as SelectFilesRouteImport } from './routes/select-files'
 import { Route as CharactersRouteImport } from './routes/characters'
+import { Route as CharacterCreateRouteImport } from './routes/character-create'
 import { Route as CdnCacheRouteImport } from './routes/cdn-cache'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiL2BridgeRouteImport } from './routes/api/l2-bridge'
@@ -30,6 +31,11 @@ const SelectFilesRoute = SelectFilesRouteImport.update({
 const CharactersRoute = CharactersRouteImport.update({
   id: '/characters',
   path: '/characters',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CharacterCreateRoute = CharacterCreateRouteImport.update({
+  id: '/character-create',
+  path: '/character-create',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CdnCacheRoute = CdnCacheRouteImport.update({
@@ -56,6 +62,7 @@ const ApiCdnSplatRoute = ApiCdnSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/cdn-cache': typeof CdnCacheRoute
+  '/character-create': typeof CharacterCreateRoute
   '/characters': typeof CharactersRoute
   '/select-files': typeof SelectFilesRoute
   '/world': typeof WorldRoute
@@ -65,6 +72,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/cdn-cache': typeof CdnCacheRoute
+  '/character-create': typeof CharacterCreateRoute
   '/characters': typeof CharactersRoute
   '/select-files': typeof SelectFilesRoute
   '/world': typeof WorldRoute
@@ -75,6 +83,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/cdn-cache': typeof CdnCacheRoute
+  '/character-create': typeof CharacterCreateRoute
   '/characters': typeof CharactersRoute
   '/select-files': typeof SelectFilesRoute
   '/world': typeof WorldRoute
@@ -86,6 +95,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/cdn-cache'
+    | '/character-create'
     | '/characters'
     | '/select-files'
     | '/world'
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/cdn-cache'
+    | '/character-create'
     | '/characters'
     | '/select-files'
     | '/world'
@@ -104,6 +115,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/cdn-cache'
+    | '/character-create'
     | '/characters'
     | '/select-files'
     | '/world'
@@ -114,6 +126,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CdnCacheRoute: typeof CdnCacheRoute
+  CharacterCreateRoute: typeof CharacterCreateRoute
   CharactersRoute: typeof CharactersRoute
   SelectFilesRoute: typeof SelectFilesRoute
   WorldRoute: typeof WorldRoute
@@ -142,6 +155,13 @@ declare module '@tanstack/react-router' {
       path: '/characters'
       fullPath: '/characters'
       preLoaderRoute: typeof CharactersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/character-create': {
+      id: '/character-create'
+      path: '/character-create'
+      fullPath: '/character-create'
+      preLoaderRoute: typeof CharacterCreateRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cdn-cache': {
@@ -178,6 +198,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CdnCacheRoute: CdnCacheRoute,
+  CharacterCreateRoute: CharacterCreateRoute,
   CharactersRoute: CharactersRoute,
   SelectFilesRoute: SelectFilesRoute,
   WorldRoute: WorldRoute,
@@ -187,3 +208,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
