@@ -11,6 +11,7 @@ import { L2Frame, L2Slot, L2Sprite } from "@/components/hud/L2Sprite";
 import { L2Gauge } from "@/components/hud/L2Gauge";
 import { L2SystemMenu } from "@/components/hud/L2SystemMenu";
 import { L2SettingsWindow, L2CalendarWindow, L2ExitDialog } from "@/components/hud/L2GameWindows";
+import { L2XdatWindow, isXdatWindowKey, type XdatWindowKey } from "@/components/hud/L2XdatWindow";
 
 export interface HudActiveChar {
   name: string;
@@ -67,22 +68,24 @@ export function L2HudAuthentic({
   const [cp, setCp] = useState({ cur: activeChar?.cp ?? 0, max: activeChar?.cpMax ?? activeChar?.cp ?? 1 });
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeWindow, setActiveWindow] = useState<"settings" | "calendar" | null>(null);
+  const [activeXdatWindow, setActiveXdatWindow] = useState<XdatWindowKey | null>(null);
   const [exitOpen, setExitOpen] = useState(false);
 
   // Toggle the system menu with the X key, like the real client.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === "x" && !(e.target as HTMLElement)?.matches?.("input,textarea")) setMenuOpen((v) => !v);
-      if (e.key === "Escape") { setMenuOpen(false); setActiveWindow(null); setExitOpen(false); }
+      if (e.key === "Escape") { setMenuOpen(false); setActiveWindow(null); setActiveXdatWindow(null); setExitOpen(false); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   const handleMenu = (key: string) => {
-    if (key === "settings") { setActiveWindow("settings"); setMenuOpen(false); }
-    else if (key === "calendar") { setActiveWindow("calendar"); setMenuOpen(false); }
+    if (key === "settings") { setActiveWindow("settings"); setActiveXdatWindow(null); setMenuOpen(false); }
+    else if (key === "calendar") { setActiveWindow("calendar"); setActiveXdatWindow(null); setMenuOpen(false); }
     else if (key === "characters" || key === "exit") { setExitOpen(true); setMenuOpen(false); }
+    else if (isXdatWindowKey(key)) { setActiveXdatWindow(key); setActiveWindow(null); setMenuOpen(false); }
     else setMenuOpen(false);
   };
 
@@ -208,6 +211,7 @@ export function L2HudAuthentic({
       <L2SystemMenu open={menuOpen} onClose={() => setMenuOpen(false)} onSelect={handleMenu} />
       {activeWindow === "settings" && <L2SettingsWindow onClose={() => setActiveWindow(null)} />}
       {activeWindow === "calendar" && <L2CalendarWindow onClose={() => setActiveWindow(null)} />}
+      {activeXdatWindow && <L2XdatWindow windowKey={activeXdatWindow} onClose={() => setActiveXdatWindow(null)} />}
       {exitOpen && <L2ExitDialog onExit={() => { setExitOpen(false); onExit?.(); }} onCancel={() => setExitOpen(false)} />}
     </div>
   );
