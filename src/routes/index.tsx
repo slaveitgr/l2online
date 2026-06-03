@@ -138,16 +138,18 @@ function Launcher() {
         <L2LoginScreen onLogin={doLogin} busy={busy} error={error} />
       ) : (
         <div style={{ position: "fixed", inset: 0, background: `#000 url(/hud/screens/LogonScreen.png) center/cover no-repeat`, fontFamily: "Tahoma, sans-serif" }}>
-          <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.55) 100%)" }} />
-          <L2Frame
-            refId="L2UI_CT1.GroupBox_Black"
-            style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: 460, padding: "16px 20px", background: "rgba(6,7,9,0.62)", color: "#e6dcc0" }}
-          >
-            <div style={{ textAlign: "center", letterSpacing: 3, fontSize: 14, fontWeight: 700, color: "#e6c87a", textShadow: "0 1px 2px #000", marginBottom: 14 }}>SELECT SERVER</div>
+          <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse at center, transparent 38%, rgba(0,0,0,0.45) 100%)" }} />
+          <div style={{ position: "absolute", left: "50%", top: "58%", transform: "translate(-50%,-50%)", width: 600, display: "flex", flexDirection: "column", alignItems: "center", gap: 12, color: "#f3e6c0" }}>
+            <div style={{ width: "100%", display: "grid", gridTemplateColumns: "150px 1fr 120px 100px", border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(180deg, rgba(17,14,12,0.86), rgba(8,8,8,0.8))", boxShadow: "0 8px 32px rgba(0,0,0,0.32)" }}>
+              <div style={{ height: 40, display: "flex", alignItems: "center", justifyContent: "center", borderRight: "1px solid rgba(255,255,255,0.12)", background: "linear-gradient(180deg, rgba(76,98,154,0.7), rgba(34,43,81,0.7))", color: "#fff1bd" }}>Server</div>
+              <div style={{ height: 40, display: "flex", alignItems: "center", padding: "0 14px", borderRight: "1px solid rgba(255,255,255,0.08)" }}>{servers.find((s) => s.id === selectedServer)?.ip ?? "L2-Superion"}</div>
+              <div style={{ height: 40, display: "flex", alignItems: "center", justifyContent: "center", borderRight: "1px solid rgba(255,255,255,0.08)" }}>Lineage 2</div>
+              <div style={{ height: 40, display: "flex", alignItems: "center", justifyContent: "center" }}>Light</div>
+            </div>
             <select
               value={selectedServer ?? ""}
               onChange={(e) => setSelectedServer(Number(e.target.value))}
-              style={{ width: "100%", height: 26, background: "#0a0a08", border: "1px solid #5a4e32", color: "#e6dcc0", fontFamily: "Tahoma, sans-serif", fontSize: 12, padding: "0 6px", outline: "none" }}
+              style={{ width: 600, height: 30, background: "linear-gradient(180deg, rgba(18,16,14,0.94), rgba(10,10,10,0.94))", border: "1px solid rgba(214,171,98,0.65)", color: "#e6dcc0", fontFamily: "Tahoma, sans-serif", fontSize: 12, padding: "0 8px", outline: "none" }}
             >
               {servers.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -155,12 +157,12 @@ function Launcher() {
                 </option>
               ))}
             </select>
-            {error && <div style={{ marginTop: 8, fontSize: 11, color: "#e06a6a", textAlign: "center" }}>{error}</div>}
-            <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 14 }}>
-              <L2Button onClick={onEnterWorld} disabled={busy || selectedServer == null} variant="large" width={120}>{busy ? "…" : "OK"}</L2Button>
-              <L2Button onClick={cancelServerSelect} disabled={busy} width={90}>Cancel</L2Button>
+            {error && <div style={{ fontSize: 11, color: "#ff8c8c", textAlign: "center" }}>{error}</div>}
+            <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
+              <L2Button onClick={onEnterWorld} disabled={busy || selectedServer == null} variant="large" width={122}>{busy ? "…" : "OK"}</L2Button>
+              <L2Button onClick={cancelServerSelect} disabled={busy} width={122}>Cancel</L2Button>
             </div>
-          </L2Frame>
+          </div>
         </div>
       )}
 

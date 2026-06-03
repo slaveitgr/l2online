@@ -1,18 +1,4 @@
-/**
- * Authentic L2 character-select screen — real CharSelect art (LogBG.utx) with the
- * character slot list on the left, a stage for the 3D model in the centre, and the
- * Start / Create / Delete / Back actions along the bottom (like the live client).
- *
- *   <SpriteProvider>
- *     <L2CharSelectScreen
- *        characters={chars} selected={i} onSelect={setI}
- *        onStart={...} onCreate={...} onDelete={...} onBack={...}
- *        renderModel={(c)=> <CharacterModel char={c}/> } />
- *   </SpriteProvider>
- *
- * `characters` come straight from CharSelectionInfo (name, level, className, …).
- */
-import { L2Frame, L2Button } from "@/components/hud/L2Sprite";
+import { L2Button } from "@/components/hud/L2Sprite";
 import type { ReactNode } from "react";
 
 const BG = "/hud/screens/CharSelect.png";
@@ -21,12 +7,44 @@ export interface CharSlot {
   name: string;
   level: number;
   className?: string;
-  className2?: string; // sub/awakened name
+  className2?: string;
+  hp?: number;
+  mp?: number;
+  sp?: number;
+  expPercent?: number;
+}
+
+function Gauge({ label, value, max = 100, color }: { label: string; value: number; max?: number; color: string }) {
+  const pct = Math.max(0, Math.min(100, max <= 0 ? 0 : (value / max) * 100));
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "24px 1fr 68px", gap: 8, alignItems: "center" }}>
+      <span style={{ fontSize: 11, color: "#e6dcc0" }}>{label}</span>
+      <div style={{ height: 10, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(0,0,0,0.45)", position: "relative" }}>
+        <div
+          style={{
+            position: "absolute",
+            inset: 1,
+            right: `${100 - pct}%`,
+            background: color,
+            boxShadow: "0 0 10px rgba(255,255,255,0.12)",
+          }}
+        />
+      </div>
+      <span style={{ fontSize: 11, color: "#d9d1bf", textAlign: "right" }}>{Math.round(value)}/{Math.round(max)}</span>
+    </div>
+  );
 }
 
 export function L2CharSelectScreen({
-  characters = [], selected = 0, maxSlots = 7,
-  onSelect, onStart, onCreate, onDelete, onBack, renderModel,
+  characters = [],
+  selected = 0,
+  maxSlots = 7,
+  onSelect,
+  onStart,
+  onCreate,
+  onDelete,
+  onBack,
+  renderModel,
 }: {
   characters?: CharSlot[];
   selected?: number;
@@ -42,55 +60,167 @@ export function L2CharSelectScreen({
   const cur = characters[selected] ?? null;
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: `#000 url(${BG}) center/cover no-repeat`, fontFamily: "Tahoma, Geneva, sans-serif", color: "#e6dcc0", overflow: "hidden" }}>
-      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, rgba(0,0,0,0.55) 0%, transparent 40%)" }} />
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: `#000 url(${BG}) center/cover no-repeat`,
+        fontFamily: "Tahoma, Geneva, sans-serif",
+        color: "#f3efe5",
+        overflow: "hidden",
+      }}
+    >
+      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.18))" }} />
 
-      {/* character slot list (left) */}
-      <div style={{ position: "absolute", left: 22, top: 64, width: 224, display: "flex", flexDirection: "column", gap: 6 }}>
-        {slots.map((c, i) => {
-          const sel = i === selected && c;
-          return (
-            <L2Frame
-              key={i}
-              style={{ height: 44, padding: "5px 10px", cursor: c ? "pointer" : "default", background: sel ? "rgba(70,56,28,0.55)" : "rgba(6,7,9,0.5)" }}
-            >
-              <div onClick={() => c && onSelect?.(i)} onDoubleClick={() => c && onStart?.(i)} style={{ height: "100%" }}>
-                {c ? (
-                  <>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: sel ? "#f4e6b8" : "#dcd0aa", textShadow: "0 1px 1px #000" }}>{c.name}</div>
-                    <div style={{ fontSize: 10, color: "#b0a482" }}>Lv {c.level} {c.className2 ?? c.className ?? ""}</div>
-                  </>
-                ) : (
-                  <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#7a7058" }}>Empty Slot</div>
-                )}
-              </div>
-            </L2Frame>
-          );
-        })}
+      <div
+        style={{
+          position: "absolute",
+          left: 16,
+          top: 12,
+          fontSize: 28,
+          fontWeight: 300,
+          color: "rgba(255,255,255,0.92)",
+          textShadow: "0 2px 4px rgba(0,0,0,0.35)",
+        }}
+      >
+        Select Character
       </div>
 
-      {/* 3D model stage (centre-right) */}
-      <div style={{ position: "absolute", left: "46%", top: 90, bottom: 64, right: 40, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-        {renderModel ? renderModel(cur) : (
-          <div style={{ width: 200, height: 300, border: "1px dashed rgba(150,135,95,0.4)", borderRadius: "50% 50% 8px 8px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "rgba(200,185,150,0.6)" }}>
-            {cur ? cur.name : "—"}
+      <div
+        style={{
+          position: "absolute",
+          left: "13%",
+          top: "21%",
+          width: "34%",
+          height: "56%",
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "center",
+          pointerEvents: "none",
+        }}
+      >
+        {renderModel ? (
+          renderModel(cur)
+        ) : (
+          <div
+            style={{
+              width: 250,
+              height: 420,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "rgba(255,255,255,0.66)",
+              textShadow: "0 1px 2px rgba(0,0,0,0.8)",
+              fontSize: 18,
+            }}
+          >
+            {cur?.name ?? "Empty slot"}
           </div>
         )}
       </div>
 
-      {/* selected char name banner */}
-      {cur && (
-        <div style={{ position: "absolute", left: "46%", right: 40, top: 56, textAlign: "center", fontSize: 18, fontWeight: 700, letterSpacing: 1, color: "#f0e2b8", textShadow: "0 2px 3px #000" }}>
-          {cur.name} <span style={{ fontSize: 12, color: "#c9a04a" }}>Lv {cur.level}</span>
-        </div>
-      )}
+      <div
+        style={{
+          position: "absolute",
+          right: 10,
+          top: 112,
+          width: 300,
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        {slots.map((c, i) => {
+          const isSelected = !!c && i === selected;
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={() => c && onSelect?.(i)}
+              onDoubleClick={() => c && onStart?.(i)}
+              style={{
+                height: 66,
+                width: "100%",
+                display: "grid",
+                gridTemplateColumns: "92px 1fr 58px",
+                alignItems: "center",
+                border: isSelected ? "2px solid rgba(255, 213, 89, 0.95)" : "1px solid rgba(255,255,255,0.16)",
+                background: isSelected
+                  ? "linear-gradient(180deg, rgba(45,45,45,0.88) 0%, rgba(18,18,18,0.82) 100%)"
+                  : "linear-gradient(180deg, rgba(72,72,72,0.35) 0%, rgba(15,15,15,0.2) 100%)",
+                boxShadow: isSelected ? "0 0 20px rgba(255, 210, 94, 0.25)" : "none",
+                padding: 0,
+                color: "inherit",
+                cursor: c ? "pointer" : "default",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  background: c
+                    ? "linear-gradient(135deg, rgba(255,213,127,0.18), rgba(255,255,255,0.02))"
+                    : "linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01))",
+                  borderRight: "1px solid rgba(255,255,255,0.08)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 11,
+                  color: c ? "#f4e1a7" : "rgba(255,255,255,0.3)",
+                }}
+              >
+                {c ? "Portrait" : "+"}
+              </div>
+              <div style={{ padding: "0 12px", textAlign: "right" }}>
+                {c ? (
+                  <>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: "#ffffff", lineHeight: 1.1 }}>Lv.{c.level}</div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.72)", marginTop: 3 }}>{c.className2 ?? c.className ?? ""}</div>
+                    <div style={{ fontSize: 14, color: "#f1c52f", fontWeight: 700, marginTop: 2 }}>{c.name}</div>
+                  </>
+                ) : null}
+              </div>
+              <div style={{ fontSize: 30, color: "rgba(255,229,154,0.86)", textAlign: "center" }}>{c ? "" : "+"}</div>
+            </button>
+          );
+        })}
+      </div>
 
-      {/* action bar (bottom) */}
-      <div style={{ position: "absolute", right: 28, bottom: 22, display: "flex", gap: 8 }}>
-        <L2Button onClick={() => onCreate?.()} width={120}>Create Character</L2Button>
-        <L2Button onClick={() => cur && onDelete?.(selected)} disabled={!cur} width={120}>Delete Character</L2Button>
-        <L2Button onClick={() => onBack?.()} width={70}>Back</L2Button>
-        <L2Button onClick={() => cur && onStart?.(selected)} disabled={!cur} variant="large" width={120}>Start</L2Button>
+      {cur ? (
+        <div
+          style={{
+            position: "absolute",
+            left: "44.5%",
+            transform: "translateX(-50%)",
+            bottom: 74,
+            width: 360,
+            textAlign: "center",
+            color: "#f2d182",
+            textShadow: "0 2px 4px rgba(0,0,0,0.7)",
+          }}
+        >
+          <div style={{ fontSize: 30, fontWeight: 500 }}>{cur.name}</div>
+          <div style={{ fontSize: 18, color: "#ffffff", marginTop: 4 }}>Lv.{cur.level} {cur.className2 ?? cur.className ?? ""}</div>
+          <div style={{ marginTop: 10, display: "grid", gap: 5 }}>
+            <Gauge label="HP" value={cur.hp ?? 100} max={cur.hp ?? 100} color="linear-gradient(90deg, #8b1818, #d44b4b)" />
+            <Gauge label="MP" value={cur.mp ?? 100} max={cur.mp ?? 100} color="linear-gradient(90deg, #14398b, #2f74ff)" />
+            <Gauge label="SP" value={cur.sp ?? 100000} max={cur.sp ?? 100000} color="linear-gradient(90deg, #8d6f1b, #d1ac39)" />
+            <Gauge label="XP" value={cur.expPercent ?? 0} max={100} color="linear-gradient(90deg, #7f7f7f, #d8d8d8)" />
+          </div>
+        </div>
+      ) : null}
+
+      <div style={{ position: "absolute", left: 6, bottom: 8, display: "flex", gap: 8 }}>
+        <L2Button onClick={() => onBack?.()} width={96} height={28}>Credits</L2Button>
+        <L2Button onClick={() => onBack?.()} width={96} height={28}>Exit</L2Button>
+      </div>
+
+      <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 8 }}>
+        <L2Button onClick={() => cur && onStart?.(selected)} disabled={!cur} width={96} height={28}>Play</L2Button>
+      </div>
+
+      <div style={{ position: "absolute", right: 8, bottom: 8, display: "flex", gap: 8 }}>
+        <L2Button onClick={() => onCreate?.()} width={110} height={28}>Create</L2Button>
+        <L2Button onClick={() => cur && onDelete?.(selected)} disabled={!cur} width={110} height={28}>Delete</L2Button>
       </div>
     </div>
   );
