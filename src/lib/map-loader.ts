@@ -6,21 +6,6 @@
  * Material→Shader/Combiner→Texture graph), and places each instance at its real
  * position/rotation/scale. Returns a THREE.Group ready to add to the scene
  * (already axis-remapped L2→three and scaled down).
- *
- * Validated end-to-end on real client files (17_25.unr Ertheia: 2081 actors;
- * Material chain → "Ertheia_a_ground02" DXT1 512×512 decoded correctly).
- *
- *   const root = await loadMap(unrBytes, getPackage);  // see getPackage note
- *   scene.add(root);
- *
- * getPackage(name) must return the raw bytes of a package by NAME, trying both
- * StaticMeshes/<name>.usx and Textures/<name>.utx (+ SysTextures). Example:
- *   const tryFolders = async (name) => {
- *     for (const p of [`StaticMeshes/${name}.usx`, `Textures/${name}.utx`, `SysTextures/${name}.utx`]) {
- *       const f = (await getFile(p)) ?? (await readFromMount(p));
- *       if (f) return f.buffer;
- *     } return null;
- *   };
  */
 import * as THREE from "three";
 import { L2Package, type MapPlacement, type L2Texture, type UExport } from "./l2-package";
@@ -34,10 +19,10 @@ import {
 export type PackageSource = (packageName: string) => Promise<ArrayBuffer | null>;
 
 export interface LoadMapOptions {
-  scale?: number; // L2 units per scene unit (default 30)
+  scale?: number;
   origin?: { x: number; y: number; z: number };
   skip?: (meshName: string) => boolean;
-  withTextures?: boolean; // default true
+  withTextures?: boolean;
   onProgress?: (msg: string) => void;
 }
 
@@ -53,7 +38,6 @@ function toThreeTexture(t: L2Texture): THREE.Texture | null {
   const dxt = DXT_FORMAT[t.format];
   let tex: THREE.Texture;
   if (dxt) {
-    // DXT1/3/5 → upload compressed straight to the GPU
     tex = new THREE.CompressedTexture(
       [{ data: t.data, width: t.width, height: t.height } as unknown as ImageData],
       t.width,
@@ -61,10 +45,9 @@ function toThreeTexture(t: L2Texture): THREE.Texture | null {
       dxt as THREE.CompressedPixelFormat,
     );
   } else if (t.format === "RGBA8") {
-    // readTexture already swizzled BGRA→RGBA → plain DataTexture
     tex = new THREE.DataTexture(t.data, t.width, t.height, THREE.RGBAFormat);
   } else {
-    return null; // P8/G16 not yet supported for world textures
+    return null;
   }
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
@@ -122,7 +105,8 @@ function buildTerrainMesh(terrain: IndexedTerrainInfo, heightmap: L2Texture): TH
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
-  geometry.setIndex(indices.length > 65535 ? indices : new Uint16Array(indices));
+  const indexArray = width * height > 65535 ? new Uint32Array(indices) : new Uint16Array(indices);
+  geometry.setIndex(new THREE.BufferAttribute(indexArray, 1));
   geometry.computeVertexNormals();
   const material = new THREE.MeshStandardMaterial({ color: 0x5c6b3a, roughness: 1, metalness: 0 });
   const mesh = new THREE.Mesh(geometry, material);
@@ -170,7 +154,6 @@ export async function loadMap(
       return { x: s.x / n, y: s.y / n, z: s.z / n };
     })();
 
-  // package cache (parse each .usx/.utx once)
   const pkgCache = new Map<string, L2Package | null>();
   const getPkg = async (name: string): Promise<L2Package | null> => {
     if (pkgCache.has(name)) return pkgCache.get(name)!;
@@ -185,7 +168,6 @@ export async function loadMap(
     return pkg;
   };
 
-  // resolve a material object-ref → a decoded diffuse texture (crosses packages)
   const texCache = new Map<string, THREE.Texture | null>();
   async function resolveTexture(pkg: L2Package, refIdx: number, depth = 0): Promise<THREE.Texture | null> {
     if (depth > 8) return null;
@@ -204,6 +186,7 @@ export async function loadMap(
     }
     return null;
   }
+
   async function resolveInPkg(pkg: L2Package, e: UExport, depth: number): Promise<THREE.Texture | null> {
     const cacheKey = `${pkg.signature}:${e.objectName}`;
     if (texCache.has(cacheKey)) return texCache.get(cacheKey)!;
@@ -223,7 +206,6 @@ export async function loadMap(
         }
       }
     }
-    // fallback: any object ref
     for (const v of Object.values(refs)) {
       const tex = await resolveTexture(pkg, v, depth + 1);
       if (tex) {
@@ -251,7 +233,6 @@ export async function loadMap(
   }
   if (terrains.length) log(`[terrain] ${terrainMeshes}/${terrains.length} heightmaps meshed`);
 
-  // group placements by package, then by mesh
   const byPkg = new Map<string, MapPlacement[]>();
   for (const p of placements) (byPkg.get(p.pkg) ?? byPkg.set(p.pkg, []).get(p.pkg)!).push(p);
 
@@ -275,7 +256,6 @@ export async function loadMap(
       if (g.uvs) geo.setAttribute("uv", new THREE.BufferAttribute(g.uvs, 2));
       geo.setIndex(new THREE.BufferAttribute(g.indices, 1));
 
-      // material: real diffuse texture if available, else neutral
       let material: THREE.Material = fallbackMat;
       if (withTex && g.uvs) {
         const ref = usx.meshMaterialRef(meshName);
@@ -309,7 +289,7 @@ export async function loadMap(
 
   const root = new THREE.Group();
   root.add(l2Group);
-  l2Group.rotation.x = -Math.PI / 2; // L2 z-up → three y-up
+  l2Group.rotation.x = -Math.PI / 2;
   root.scale.setScalar(1 / scale);
   root.name = "L2Map";
   return root;
