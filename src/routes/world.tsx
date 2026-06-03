@@ -51,7 +51,9 @@ function WorldPage() {
   return (
     <div className="fixed inset-0 bg-background overflow-hidden">
       <WorldViewport />
-      <L2Hud charName={char.name} charLevel={char.level} onExit={exitWorld} />
+      <L2HudAuthentic />
+      {false && <span>{char.name}{char.level}</span>}
+      <button onClick={exitWorld} className="hidden">exit</button>
       <div className="absolute top-1.5 left-1/2 -translate-x-1/2 text-[8px] font-mono text-muted-foreground tracking-widest pointer-events-none z-50">
         L2SLAVE · pkts {packetCount}
       </div>
