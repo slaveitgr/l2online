@@ -12,7 +12,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 
-interface ModelPart { name: string; positions: number[]; uvs: number[]; indices: number[] }
+interface ModelPart { name: string; positions: number[]; uvs: number[]; indices: number[]; texture?: string }
 interface ModelFile { race: string; gender: string; parts: ModelPart[]; bbox: { min: number[]; max: number[] } }
 
 const RACE_FILE: Record<string, string> = {
@@ -53,7 +53,9 @@ export function CharacterModel({
     root.rotation.x = -Math.PI / 2;
 
     let raf = 0;
+    const texLoader = new THREE.TextureLoader();
     const skin = new THREE.MeshStandardMaterial({ color: 0xcdb49a, roughness: 0.78, metalness: 0.02 });
+    const materials: THREE.Material[] = [skin];
 
     fetch(file)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("model not found"))))
@@ -65,7 +67,15 @@ export function CharacterModel({
           if (part.uvs?.length) geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(part.uvs), 2));
           geo.setIndex(new THREE.BufferAttribute(new Uint32Array(part.indices), 1));
           geo.computeVertexNormals();
-          root.add(new THREE.Mesh(geo, skin));
+          let mat: THREE.Material = skin;
+          if (part.texture) {
+            const tex = texLoader.load(part.texture);
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.flipY = true;
+            mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7, metalness: 0.02 });
+            materials.push(mat);
+          }
+          root.add(new THREE.Mesh(geo, mat));
         }
         // frame the model
         const box = new THREE.Box3().setFromObject(root);
@@ -97,6 +107,7 @@ export function CharacterModel({
       disposed = true;
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", onResize);
+      materials.forEach((m) => m.dispose());
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
