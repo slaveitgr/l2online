@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import { L2Button, L2Frame, L2Sprite, useSprites } from "./L2Sprite";
 
 const CLIENT_LOGON = "/hud/screens/LogonScreen.png";
+const CLIENT_VIDEO = "/hud/videos/login_web.mp4";
 
 const REQUIRED_CLIENT_REFS = [
   "L2UI_CH3.LoginWnd.aboutOTPIcon_over",
@@ -205,7 +206,7 @@ function MenuPanel() {
   );
 }
 
-function ClientAssetPanel({ screenState }: { screenState: AssetState }) {
+function ClientAssetPanel({ screenState, videoState }: { screenState: AssetState; videoState: AssetState }) {
   const sprites = useSprites();
   const found = REQUIRED_CLIENT_REFS.filter((ref) => sprites?.has(ref)).length;
   const manifestCount = useMemo(
@@ -215,7 +216,8 @@ function ClientAssetPanel({ screenState }: { screenState: AssetState }) {
 
   return (
     <Panel title="CLIENT DATA" style={{ right: "3.2%", top: "4%", width: 300 }}>
-      <Row label="screen" value={CLIENT_LOGON} ok={screenState === "ok"} />
+      <Row label="video" value={CLIENT_VIDEO} ok={videoState === "ok"} />
+      <Row label="fallback" value={CLIENT_LOGON} ok={screenState === "ok"} />
       <Row label="ui manifest" value={sprites ? `${manifestCount} textures` : "loading"} ok={Boolean(sprites)} />
       <Row label="required refs" value={`${found}/${REQUIRED_CLIENT_REFS.length}`} ok={found === REQUIRED_CLIENT_REFS.length} />
       <div style={{ height: 1, background: "rgba(210,185,110,0.22)", margin: "8px 0" }} />
@@ -267,6 +269,7 @@ export function L2LoginScreen({
   const [id, setId] = useState("");
   const [pw, setPw] = useState("");
   const [screenState, setScreenState] = useState<AssetState>("loading");
+  const [videoState, setVideoState] = useState<AssetState>("loading");
 
   useEffect(() => {
     let alive = true;
@@ -305,10 +308,30 @@ export function L2LoginScreen({
           background: `#000 url(${CLIENT_LOGON}) center/cover no-repeat`,
         }}
       >
+        <video
+          src={CLIENT_VIDEO}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          poster={CLIENT_LOGON}
+          onCanPlay={() => setVideoState("ok")}
+          onLoadedData={() => setVideoState("ok")}
+          onError={() => setVideoState("failed")}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            pointerEvents: "none",
+          }}
+        />
         <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.08)", pointerEvents: "none" }} />
         <div style={{ position: "absolute", inset: 0, zIndex: 2, pointerEvents: "none" }}>
           <MenuPanel />
-          <ClientAssetPanel screenState={screenState} />
+          <ClientAssetPanel screenState={screenState} videoState={videoState} />
           <ServerInfoPanel busy={busy} />
           <LogPanel statusLog={statusLog} />
           <Field
