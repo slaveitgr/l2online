@@ -183,69 +183,125 @@ function Launcher() {
               background: `url(${serverSelect.url}) center/contain no-repeat`,
             }}
           >
-            <select
-              value={selectedServer ?? ""}
-              onChange={(e) => setSelectedServer(Number(e.target.value))}
-              aria-label="Server"
+            <div
               style={{
                 position: "absolute",
-                left: "34.5%",
-                top: "75.5%",
-                width: "31%",
-                height: "3.9%",
-                opacity: 0.01,
+                left: "50%",
+                top: "50%",
+                transform: "translate(-50%, -50%)",
+                width: "min(440px, 70%)",
+                padding: "22px 26px",
+                background:
+                  "linear-gradient(to bottom, rgba(28,24,16,0.96), rgba(10,8,6,0.96))",
+                border: "1px solid rgba(204,180,120,0.55)",
+                borderRadius: 4,
+                boxShadow: "0 10px 30px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,235,180,0.15)",
+                color: "#e6dcb6",
+                fontFamily: "Arial, Helvetica, sans-serif",
               }}
             >
-              {servers.map((s) => (
-                <option key={s.id} value={s.id}>{`#${s.id} ${s.ip}:${s.port}`}</option>
-              ))}
-            </select>
-            <button
-              aria-label="OK"
-              onClick={onEnterWorld}
-              disabled={busy || selectedServer == null}
-              style={{
-                position: "absolute",
-                left: "43.2%",
-                top: "80.8%",
-                width: "6.6%",
-                height: "3.3%",
-                opacity: 0,
-                border: 0,
-                cursor: "pointer",
-              }}
-            />
-            <button
-              aria-label="Cancel"
-              onClick={cancelServerSelect}
-              disabled={busy}
-              style={{
-                position: "absolute",
-                left: "50.2%",
-                top: "80.8%",
-                width: "6.5%",
-                height: "3.3%",
-                opacity: 0,
-                border: 0,
-                cursor: "pointer",
-              }}
-            />
-            {error && (
               <div
                 style={{
-                  position: "absolute",
-                  left: "50%",
-                  top: "85%",
-                  transform: "translateX(-50%)",
-                  fontSize: 11,
-                  color: "#ff8c8c",
+                  fontSize: 16,
+                  letterSpacing: 2,
                   textAlign: "center",
+                  marginBottom: 14,
                   textShadow: "0 1px 2px #000",
+                  color: "#f0e3b3",
                 }}
               >
-                {error}
+                SERVER SELECTION
               </div>
-            )}
+              <div style={{ maxHeight: 220, overflowY: "auto", marginBottom: 14 }}>
+                {servers.length === 0 ? (
+                  <div style={{ textAlign: "center", opacity: 0.7, padding: 12 }}>No servers</div>
+                ) : (
+                  servers.map((s) => {
+                    const active = s.id === selectedServer;
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => setSelectedServer(s.id)}
+                        onDoubleClick={onEnterWorld}
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          textAlign: "left",
+                          padding: "8px 12px",
+                          marginBottom: 4,
+                          background: active
+                            ? "linear-gradient(to bottom, rgba(120,96,52,0.85), rgba(60,46,24,0.85))"
+                            : "rgba(255,255,255,0.04)",
+                          border: `1px solid ${active ? "rgba(230,210,140,0.8)" : "rgba(150,130,90,0.35)"}`,
+                          borderRadius: 3,
+                          color: active ? "#fff8d8" : "#d8cea8",
+                          fontSize: 13,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <span style={{ opacity: 0.7 }}>#{s.id}</span>{" "}
+                        <span>
+                          {s.ip}:{s.port}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+                <button
+                  type="button"
+                  onClick={onEnterWorld}
+                  disabled={busy || selectedServer == null}
+                  style={{
+                    padding: "8px 22px",
+                    background:
+                      "linear-gradient(to bottom, rgba(107,98,74,0.94), rgba(43,39,30,0.98))",
+                    border: "1px solid rgba(230,215,156,0.7)",
+                    borderRadius: 3,
+                    color: "#fff",
+                    cursor: busy || selectedServer == null ? "default" : "pointer",
+                    opacity: busy || selectedServer == null ? 0.5 : 1,
+                    fontSize: 13,
+                    textShadow: "0 1px 2px #000",
+                  }}
+                >
+                  {busy ? "…" : "OK"}
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelServerSelect}
+                  disabled={busy}
+                  style={{
+                    padding: "8px 22px",
+                    background:
+                      "linear-gradient(to bottom, rgba(80,72,52,0.9), rgba(30,26,20,0.96))",
+                    border: "1px solid rgba(180,160,110,0.55)",
+                    borderRadius: 3,
+                    color: "#e4dcc2",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    textShadow: "0 1px 2px #000",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+              {error && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    color: "#ff8c8c",
+                    fontSize: 12,
+                    textAlign: "center",
+                    textShadow: "0 1px 2px #000",
+                  }}
+                >
+                  {error}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
