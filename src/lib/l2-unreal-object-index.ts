@@ -43,11 +43,17 @@ export type UnrealPropertyValue =
   | string
   | number[]
   | UnrealObjectRef
+  | UnrealRawArray
   | UnrealProperty[];
 
 export interface UnrealObjectRef {
   index: number;
   target: RefTarget;
+}
+
+export interface UnrealRawArray {
+  count: number;
+  bytes: Uint8Array;
 }
 
 export interface UnrealProperty {
@@ -96,6 +102,22 @@ export interface IndexedMapPlacement extends MapPlacement {
   rawProperties: UnrealProperty[];
 }
 
+export interface IndexedTerrainInfo {
+  exportIndex: number;
+  objectName: string;
+  terrainMap: UnrealObjectRef | null;
+  terrainScale: [number, number, number];
+  location: [number, number, number];
+  rotation: [number, number, number];
+  drawScale: number;
+  mapX: number;
+  mapY: number;
+  quadVisibilityBitmap: UnrealRawArray | null;
+  edgeTurnBitmap: UnrealRawArray | null;
+  layerCount: number;
+  rawProperties: UnrealProperty[];
+}
+
 interface Cursor {
   o: number;
 }
@@ -133,6 +155,45 @@ export function buildObjectIndex(pkg: L2Package, opts: { includeClasses?: string
     classHistogram,
     exports,
   };
+}
+
+export function readIndexedTerrainInfos(pkg: L2Package): IndexedTerrainInfo[] {
+  const terrains: IndexedTerrainInfo[] = [];
+
+  pkg.exports.forEach((exp, i) => {
+    if (exp.className !== "TerrainInfo" || exp.size <= 0) return;
+    const properties = readExportProperties(pkg, exp);
+    const props = propsByName(properties);
+    const scale = tupleProp(props, "TerrainScale", 3) ?? [0, 0, 0];
+    const loc = tupleProp(props, "Location", 3) ?? [0, 0, 0];
+    const rot = tupleProp(props, "Rotation", 3) ?? [0, 0, 0];
+    const layers = properties.filter((p) => p.name === "Layers" && p.structName === "TerrainLayer").length;
+
+    terrains.push({
+      exportIndex: i + 1,
+      objectName: exp.objectName,
+      terrainMap: objectProp(props, "TerrainMap"),
+      terrainScale: [scale[0], scale[1], scale[2]],
+      location: [loc[0], loc[1], loc[2]],
+      rotation: [rot[0], rot[1], rot[2]],
+      drawScale: numberProp(props, "DrawScale") ?? 1,
+      mapX: numberProp(props, "MapX") ?? 0,
+      mapY: numberProp(props, "MapY") ?? 0,
+      quadVisibilityBitmap: rawArrayProp(props, "QuadVisibilityBitmap"),
+      edgeTurnBitmap: rawArrayProp(props, "EdgeTurnBitmap"),
+      layerCount: layers,
+      rawProperties: properties,
+    });
+  });
+
+  return terrains;
+}
+
+export function bitsetHas(raw: UnrealRawArray | null, index: number): boolean {
+  if (!raw || index < 0) return false;
+  const byte = raw.bytes[index >> 3];
+  if (byte === undefined) return false;
+  return (byte & (1 << (index & 7))) !== 0;
 }
 
 export function readIndexedMapPlacements(
@@ -290,18 +351,12 @@ function readStructValue(pkg: L2Package, structName: string | null, cur: Cursor,
   return nested.length ? nested : null;
 }
 
-function readArrayValue(pkg: L2Package, cur: Cursor, end: number): UnrealPropertyValue {
-  if (cur.o >= end) return [];
+function readArrayValue(pkg: L2Package, cur: Cursor, end: number): UnrealRawArray {
+  if (cur.o >= end) return { count: 0, bytes: new Uint8Array() };
   const count = readCompat32(pkg.bytes, cur);
-  if (count < 0 || count > 100000) return [];
-
-  const values: UnrealProperty[] = [];
-  for (let i = 0; i < count && cur.o < end; i++) {
-    const nested = readPropertyList(pkg, cur, end, 500);
-    if (nested.length === 0) break;
-    values.push(...nested);
-  }
-  return values;
+  const start = cur.o;
+  const safeEnd = Math.max(start, Math.min(end, pkg.bytes.length));
+  return { count: count < 0 ? 0 : count, bytes: pkg.bytes.slice(start, safeEnd) };
 }
 
 function skipStateFrame(pkg: L2Package, cur: Cursor, end: number) {
@@ -340,6 +395,11 @@ function numberProp(props: Map<string, UnrealProperty>, name: string): number | 
 function objectProp(props: Map<string, UnrealProperty>, name: string): UnrealObjectRef | null {
   const value = props.get(name)?.value;
   return value && typeof value === "object" && "index" in value && "target" in value ? value : null;
+}
+
+function rawArrayProp(props: Map<string, UnrealProperty>, name: string): UnrealRawArray | null {
+  const value = props.get(name)?.value;
+  return value && typeof value === "object" && "count" in value && "bytes" in value ? value : null;
 }
 
 function boolProp(props: Map<string, UnrealProperty>, ...names: string[]): boolean {
