@@ -1,55 +1,97 @@
+# Phase 2 — Mobile HUD action wiring
 
-# Mobile Game HUD πάνω από /world
+Συνδέουμε το `MobileGameHud` με το game/network layer και προσθέτουμε tap-to-target / tap-to-move από το 3D canvas. Μόνο frontend + protocol calls, χωρίς αλλαγές σε scene rendering ή desktop HUD.
 
-Ξεχωριστό overlay layer για mobile, χωρίς να αγγίξουμε το desktop `L2HudAuthentic` ή το `WorldViewport` rendering. Επιλογή HUD γίνεται στο `world.tsx` με βάση mobile detection.
+## 1. Game client send methods
 
-## Phase 1 — Foundations (αυτό το loop)
+Επέκταση `src/lib/l2-protocol/game-client.ts` με public methods:
 
-### 1. PWA landscape
-- `public/manifest.webmanifest` με `display: fullscreen`, `orientation: landscape`, icons placeholders (192/512).
-- `src/routes/__root.tsx` head(): προσθήκη `<link rel="manifest">`, `theme-color`, `mobile-web-app-capable`, `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`.
-- `src/lib/mobile/orientation.ts`: `lockLandscape()` με try/catch γύρω από `screen.orientation.lock("landscape")`. Καλείται σε user gesture / on mount στο /world (silent fail σε browsers που δεν υποστηρίζουν).
+- `sendMoveTo(x: number, y: number, z: number)` — MoveBackwardToLocation (0x01)
+- `sendAttack(objectId: number)` — Attack (0x01? ή ανάλογα build) με origin x/y/z + shift flag
+- `sendAction(objectId: number, shift?: boolean)` — Action (0x04) για target / interact / talk to NPC
+- `sendSay(text: string, channel?: number)` — Say2 (0x49) με default channel ALL=0
 
-**Σημείωση**: ΔΕΝ προσθέτουμε `vite-plugin-pwa` ή service worker — μόνο manifest για installability + orientation preference. Αυτό αποφεύγει cache/preview προβλήματα.
+Κάθε method:
+- noop αν `!this.connected`
+- φτιάχνει το packet bytes με τα ήδη υπάρχοντα helpers του project (writer/encryption pipeline που χρησιμοποιείται για AuthLogin κλπ)
+- περνά από το ίδιο encrypt+send path
 
-### 2. Mobile detection
-- `src/hooks/useIsMobileGame.ts`: επιστρέφει `{ isMobile, isLandscape }` βάσει `matchMedia("(pointer: coarse)")` + viewport width < 900, με listeners για `resize` / `orientationchange`. SSR-safe (initial `false`, set στο `useEffect`).
+Δεν αλλάζουμε υπάρχουσες handlers ή event types.
 
-### 3. Rotate overlay
-- `src/components/mobile/RotateDeviceOverlay.tsx`: fullscreen z-9999 panel, semantic tokens (`text-gold`, `text-muted-foreground`).
+## 2. Selected target state
 
-### 4. Mobile HUD shell
-- `src/components/mobile/MobileGameHud.tsx`: το layout από το μήνυμα — player panel (HP/MP/CP bars), minimap, chat toggle, virtual joystick, target panel, action buttons (attack/interact/potion + 4 skill slots). Tailwind arbitrary values (`bottom-[62px]`) όπου χρειάζεται. Props: `onAttack?`, `onInteract?`, `onMove?(dx, dy)`.
-- `VirtualJoystick`: pointer events με `setPointerCapture`, υπολογίζει normalized dx/dy και καλεί `onMove` (Phase 2 το hooks σε packets).
-- Όλα `pointer-events-none` στο outer, `pointer-events-auto` σε interactive children.
+Νέο lightweight store `src/lib/game-state.ts` (Zustand-free, plain module + listeners ή ένα μικρό `useSyncExternalStore` hook):
 
-### 5. Glass UI CSS
-- `src/styles.css` `@layer utilities`: `.l2-mobile-panel` (gold border, dark gradient, backdrop-blur, inset highlight) και `.mobile-game-hud` (`touch-action: none`, no select).
+- `selectedTargetId: number | null`
+- `setSelectedTarget(id, meta?)`
+- `useSelectedTarget()` hook
 
-### 6. Wire-up στο /world
-- `src/routes/world.tsx`: import hook + νέα components, conditional render — desktop ⇒ `L2HudAuthentic`, mobile portrait ⇒ `RotateDeviceOverlay`, mobile landscape ⇒ `MobileGameHud`. `useEffect` καλεί `lockLandscape()` όταν `isMobile`.
+Έτσι το `MobileGameHud` και το `WorldViewport` μοιράζονται target χωρίς prop drilling μέσα από το `world.tsx`.
 
-## Phase 2 — Action wiring (επόμενο loop, μόλις εγκριθεί η Phase 1)
+## 3. Tap-to-target / tap-to-move στο WorldViewport
 
-Προσθήκη methods στο `src/lib/l2-protocol/game-client.ts`:
-- `sendMoveTo(x, y, z)`
-- `sendAttack(objectId)`
-- `sendAction(objectId)` (target / interact)
-- `sendSay(text, channel)`
+Στο `src/components/WorldViewport.tsx`:
 
-Το `MobileGameHud` καλεί `getGameConnection()?.sendXxx(...)`. Το UI δεν φτιάχνει bytes — μόνο calls. Στη συνέχεια tap-to-target / tap-to-move από το canvas (raycast στο `WorldViewport`, expose callback prop).
+- Προσθήκη `onPointerDown` listener στο canvas:
+  - raycast στους loaded actor meshes (έχουν ήδη userData με objectId αν είναι entity)
+  - αν hit entity → `setSelectedTarget(objectId)` + `props.onTargetTap?.(id)`
+  - αν hit ground → υπολόγισε world (x,y,z) → `props.onGroundTap?.(x,y,z)`
+- Mobile-only: long-press (>250ms) στο ίδιο σημείο = move command (αντί για απλό tap). Για τώρα: απλό tap = target/move ανάλογα με hit.
+- Camera touch controls μένουν ως έχουν.
 
-## Out of scope τώρα
+Props (όλα optional, ώστε desktop usage να μην σπάει):
+```ts
+interface WorldViewportProps {
+  onTargetTap?: (objectId: number) => void;
+  onGroundTap?: (x: number, y: number, z: number) => void;
+}
+```
 
-- Service worker / offline.
-- Πραγματικά εικονίδια PWA (placeholders).
-- Skill cooldowns, drag-to-rearrange skillbar, inventory UI.
-- Καμία αλλαγή σε desktop HUD ή Three.js scene.
+## 4. Wire-up στο world.tsx
+
+```tsx
+<WorldViewport
+  onTargetTap={(id) => getGameConnection()?.sendAction(id)}
+  onGroundTap={(x,y,z) => getGameConnection()?.sendMoveTo(x,y,z)}
+/>
+...
+<MobileGameHud
+  targetId={selectedTargetId}
+  onAttack={() => { const id = getSelectedTarget(); if (id) getGameConnection()?.sendAttack(id); }}
+  onInteract={() => { const id = getSelectedTarget(); if (id) getGameConnection()?.sendAction(id); }}
+  onMove={(dx,dy) => { /* joystick → continuous move, see §5 */ }}
+  onSay={(t) => getGameConnection()?.sendSay(t)}
+/>
+```
+
+## 5. Joystick → movement
+
+Joystick επιστρέφει normalized `dx,dy ∈ [-1,1]`. Στρατηγική:
+- Όσο `|dx|+|dy| > 0.15`: κάθε ~300ms στέλνουμε `sendMoveTo(playerX + dx*R, playerY + dy*R, playerZ)` με `R ≈ 800` (L2 units). Στο release στέλνουμε ένα stop move (move-to current position).
+- Throttling με `setInterval` που ζει όσο το joystick είναι active.
+
+Player position: παίρνεται από το game-state (θα προστεθεί `selfPosition` που ενημερώνεται από world packets — αν δεν υπάρχει ακόμα, fallback σε (0,0,0) και TODO).
+
+## 6. Target panel binding
+
+Στο `MobileGameHud` το "No target" αντικαθίσταται με `targetId ? "Target #" + targetId : "No target"` (HP bar μένει placeholder 100% μέχρι να έρθουν stats από StatusUpdate packet — out of scope τώρα).
+
+## Out of scope
+
+- Real HP/MP/CP από character status packets (χωριστό loop).
+- Skill cooldowns, skill packets (RequestMagicSkillUse).
+- Inventory / item use packets.
+- Pathfinding — βασιζόμαστε στο server-side movement validation.
+- Καμία αλλαγή σε desktop HUD ή scene rendering.
 
 ## Files
 
-**New**: `public/manifest.webmanifest`, `src/lib/mobile/orientation.ts`, `src/hooks/useIsMobileGame.ts`, `src/components/mobile/RotateDeviceOverlay.tsx`, `src/components/mobile/MobileGameHud.tsx`.
+**New**: `src/lib/game-state.ts`
 
-**Edited**: `src/routes/__root.tsx` (head links), `src/styles.css` (utilities), `src/routes/world.tsx` (conditional HUD).
+**Edited**:
+- `src/lib/l2-protocol/game-client.ts` (4 νέες send methods)
+- `src/components/WorldViewport.tsx` (raycast + tap props)
+- `src/components/mobile/MobileGameHud.tsx` (target binding, joystick throttle)
+- `src/routes/world.tsx` (wire callbacks)
 
-Έτοιμος να προχωρήσω με Phase 1 μόλις πεις ναι;
+Πάμε;
