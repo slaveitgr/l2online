@@ -62,7 +62,12 @@ function Characters() {
           try {
             sessionStorage.setItem(
               "l2.activeChar",
-              JSON.stringify({ name: cur.name, level: cur.level, klass: cur.klass, race: cur.race }),
+              JSON.stringify({
+                name: cur.name,
+                level: cur.level,
+                klass: cur.klass,
+                race: cur.race,
+              }),
             );
           } catch {
             /* ignore */
