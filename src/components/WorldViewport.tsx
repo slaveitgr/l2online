@@ -288,8 +288,20 @@ export function WorldViewport() {
         mapGroup = await loadMap(
           unrBytes.buffer.slice(unrBytes.byteOffset, unrBytes.byteOffset + unrBytes.byteLength) as ArrayBuffer,
           async (pkgName) => {
-            const path = meshIndex.get(pkgName.toLowerCase()) ?? `staticmeshes/${pkgName}.usx`;
-            return await bytesForPath(path);
+            // Try mount → cache, across StaticMeshes/.usx, Textures/.utx, SysTextures/.utx.
+            for (const p of [
+              `StaticMeshes/${pkgName}.usx`,
+              `staticmeshes/${pkgName}.usx`,
+              `Textures/${pkgName}.utx`,
+              `textures/${pkgName}.utx`,
+              `SysTextures/${pkgName}.utx`,
+              `systextures/${pkgName}.utx`,
+            ]) {
+              const buf = await bytesForPath(p);
+              if (buf) return buf;
+            }
+            const indexed = meshIndex.get(pkgName.toLowerCase());
+            return indexed ? await bytesForPath(indexed) : null;
           },
           {
             scale: SCALE,
