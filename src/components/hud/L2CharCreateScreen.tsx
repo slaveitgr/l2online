@@ -170,7 +170,7 @@ export function L2CharCreateScreen({
         </div>
       </div>
 
-      <div style={{ position: "absolute", left: "34%", right: "25%", top: 34, display: "flex", justifyContent: "center", gap: 22 }}>
+      <div style={{ position: "absolute", left: "38%", right: 24, top: 18, display: "flex", justifyContent: "flex-end", gap: 26, alignItems: "center" }}>
         {RACES.map((entry, i) => {
           const active = i === raceI;
           return (
