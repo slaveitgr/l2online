@@ -67,6 +67,13 @@ function Characters() {
                 level: cur.level,
                 klass: cur.klass,
                 race: cur.race,
+                hp: cur.hp,
+                hpMax: cur.hp,
+                mp: cur.mp,
+                mpMax: cur.mp,
+                cp: cur.hp,
+                cpMax: cur.hp,
+                expPercent: cur.expPercent,
               }),
             );
           } catch {
