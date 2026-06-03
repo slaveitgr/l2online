@@ -184,19 +184,101 @@ function CdnCachePage() {
   const progressPct = progress ? (progress.bytesDone / Math.max(1, progress.bytesTotal)) * 100 : 0;
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="border-b border-border/60 px-6 py-3 flex items-center justify-between backdrop-blur">
+    <div
+      className="min-h-screen flex flex-col"
+      style={{
+        background:
+          "radial-gradient(ellipse at top, #1a140a 0%, #060403 60%, #000 100%)",
+        color: "#d6cfaa",
+        fontFamily: "Arial, Helvetica, sans-serif",
+      }}
+    >
+      <header
+        className="px-6 py-4 flex items-center justify-between"
+        style={{
+          borderBottom: "1px solid #5a4a28",
+          background:
+            "linear-gradient(180deg, rgba(28,22,12,0.95) 0%, rgba(10,8,6,0.95) 100%)",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.6)",
+        }}
+      >
         <div className="flex items-center gap-3">
-          <Link to="/" className="w-8 h-8 rounded-sm bg-gradient-to-br from-primary to-blood flex items-center justify-center font-display text-primary-foreground font-bold">L</Link>
+          <Link
+            to="/"
+            style={{
+              width: 32,
+              height: 32,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background:
+                "linear-gradient(180deg,#3a3424 0%,#1f1a10 100%)",
+              border: "1px solid #6a5630",
+              color: "#e6dcb6",
+              fontFamily: "Cinzel, Georgia, serif",
+              fontWeight: 700,
+              textShadow: "0 1px 2px #000",
+            }}
+          >
+            L
+          </Link>
           <div>
-            <h1 className="font-display text-gold text-lg leading-none tracking-widest">ASSET DISTRIBUTION</h1>
-            <p className="text-[10px] text-muted-foreground tracking-[0.3em] uppercase">CDN streaming · slave.gr</p>
+            <h1
+              style={{
+                fontFamily: "Cinzel, 'Trajan Pro', Georgia, serif",
+                color: "#e6dcb6",
+                fontSize: 18,
+                letterSpacing: 5,
+                margin: 0,
+                textShadow: "0 1px 2px #000",
+              }}
+            >
+              ASSET DISTRIBUTION
+            </h1>
+            <p
+              style={{
+                fontSize: 10,
+                color: "#8a7f5a",
+                letterSpacing: "0.3em",
+                textTransform: "uppercase",
+                margin: 0,
+                marginTop: 2,
+              }}
+            >
+              CDN streaming · slave.gr
+            </p>
           </div>
         </div>
-        <Link to="/select-files" className="text-xs text-muted-foreground hover:text-gold transition-colors font-mono">
-          Upload local folder instead →
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link
+            to="/select-files"
+            style={{
+              fontSize: 12,
+              color: "#a99b72",
+              fontFamily: "monospace",
+              letterSpacing: 0.5,
+            }}
+          >
+            Upload local folder →
+          </Link>
+          <Link
+            to="/"
+            style={{
+              fontSize: 12,
+              padding: "6px 14px",
+              background:
+                "linear-gradient(180deg,#3a3424 0%,#1f1a10 100%)",
+              border: "1px solid #6a5630",
+              color: "#e6dcb6",
+              textShadow: "0 1px 2px #000",
+              letterSpacing: 1,
+            }}
+          >
+            ← BACK TO LOGIN
+          </Link>
+        </div>
       </header>
+
 
       <main className="flex-1 max-w-5xl w-full mx-auto p-6 space-y-6">
         {/* Local folder mount */}
