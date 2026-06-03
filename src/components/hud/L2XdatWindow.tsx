@@ -104,7 +104,7 @@ export function L2XdatWindow({ windowKey, onClose }: { windowKey: XdatWindowKey;
       <div style={{ color: "#cabf98", fontSize: 11 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <span style={{ color: "#d8b25a", fontWeight: 700 }}>{def.parent}</span>
-          <span style={{ color: def.exact ? "#7ad84a" : "#d8b25a" }}>{def.exact ? "exact xdat parent" : "mapped xdat parent"}</span>
+          <span style={{ color: "exact" in def && def.exact ? "#7ad84a" : "#d8b25a" }}>{"exact" in def && def.exact ? "exact xdat parent" : "mapped xdat parent"}</span>
           <span style={{ marginLeft: "auto", color: "#8a8270" }}>{def.controlCount} controls</span>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>

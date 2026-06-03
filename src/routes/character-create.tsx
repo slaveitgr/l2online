@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { SpriteProvider } from "@/components/hud/L2Sprite";
 import { L2CharCreateScreen } from "@/components/hud/L2CharCreateScreen";
+import { CharacterModel } from "@/components/CharacterModel";
 
 export const Route = createFileRoute("/character-create")({
   head: () => ({
@@ -23,6 +24,7 @@ function CharacterCreate() {
           console.log("[char-create]", opts);
           navigate({ to: "/characters" });
         }}
+        renderModel={(o) => <CharacterModel race={o.race} gender={o.sex ? "F" : "M"} />}
       />
     </SpriteProvider>
   );
