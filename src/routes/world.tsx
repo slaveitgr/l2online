@@ -2,10 +2,10 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { WorldViewport } from "@/components/WorldViewport";
 import {
-  L2HudMockup,
+  L2HudAuthentic,
   type HudActiveChar,
   type HudChatLine,
-} from "@/components/hud/L2HudMockup";
+} from "@/components/hud/L2HudAuthentic";
 import { SpriteProvider } from "@/components/hud/L2Sprite";
 import { MobileGameHud } from "@/components/mobile/MobileGameHud";
 import { RotateDeviceOverlay } from "@/components/mobile/RotateDeviceOverlay";
@@ -63,7 +63,6 @@ function WorldPage() {
     timer: null,
   });
 
-  // Initial char from session + bail-out if no live game connection.
   useEffect(() => {
     let initial: StoredChar | null = null;
     try {
@@ -75,7 +74,6 @@ function WorldPage() {
 
     const conn = getGameConnection();
     if (!conn || !conn.connected) {
-      // No live session: send back to character select if we have one, else login.
       navigate({ to: initial ? "/characters" : "/" });
       return;
     }
@@ -96,7 +94,6 @@ function WorldPage() {
       });
     }
 
-    // Welcome line
     setChat((c) => [
       ...c,
       {
@@ -105,7 +102,6 @@ function WorldPage() {
       },
     ]);
 
-    // Pull current player snapshot if available.
     const p0 = conn.getPlayer?.();
     if (p0) {
       setChar((prev) => ({
@@ -201,6 +197,16 @@ function WorldPage() {
     navigate({ to: "/" });
   }
 
+  function sendChat(text: string) {
+    const conn = getGameConnection();
+    if (!conn) return;
+    conn.sendSay(text);
+    setChat((c) => [
+      ...c,
+      { color: "#f6ecc8", text: `${char?.name ?? "You"}: ${text}` },
+    ]);
+  }
+
   return (
     <div className="fixed inset-0 bg-background overflow-hidden">
       <WorldViewport
@@ -228,19 +234,11 @@ function WorldPage() {
             <RotateDeviceOverlay />
           )
         ) : (
-          <L2HudMockup
+          <L2HudAuthentic
             activeChar={char ?? undefined}
             chatLines={chat}
             onExit={leaveWorld}
-            onSendChat={(text) => {
-              const conn = getGameConnection();
-              if (!conn) return;
-              conn.sendSay(text);
-              setChat((c) => [
-                ...c,
-                { color: "#f6ecc8", text: `${char?.name ?? "You"}: ${text}` },
-              ]);
-            }}
+            onSendChat={sendChat}
           />
         )}
       </SpriteProvider>
