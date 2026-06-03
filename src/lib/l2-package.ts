@@ -35,6 +35,7 @@ export interface UImport {
   classPackage: string;
   className: string;
   objectName: string;
+  outer: number; // package/outer object reference (negative → another import)
 }
 export interface UExport {
   idClass: number;
@@ -69,6 +70,21 @@ export interface ActorPlacement {
   y: number;
   z: number;
   scale: number; // DrawScale (uniform), default 1
+}
+
+/** A StaticMeshActor placement with its mesh reference + full transform. */
+export interface MapPlacement {
+  x: number;
+  y: number;
+  z: number;
+  /** UE rotator components in radians (already converted from 0..65535). */
+  pitch: number;
+  yaw: number;
+  roll: number;
+  scale: number; // DrawScale
+  scale3d: [number, number, number]; // DrawScale3D (default 1,1,1)
+  mesh: string; // StaticMesh object name
+  pkg: string; // package (.usx) that holds the mesh
 }
 
 // ── low level reads ──
@@ -189,13 +205,15 @@ export class L2Package {
       o += s1;
       const [cn, s2] = readCompat32(b, o);
       o += s2;
-      o += 4; // package int32
+      const outer = dv.getInt32(o, true);
+      o += 4; // package/outer int32
       const [on, s3] = readCompat32(b, o);
       o += s3;
       this.imports.push({
         classPackage: this.nm(cp),
         className: this.nm(cn),
         objectName: this.nm(on),
+        outer,
       });
     }
 
@@ -233,6 +251,65 @@ export class L2Package {
   /** Find an export by object name (e.g. a StaticMesh). */
   findExport(name: string): UExport | undefined {
     return this.exports.find((e) => e.objectName === name);
+  }
+
+  /** Resolve an object reference (compat32): <0 import, >0 export → {name, pkg}. */
+  private resolveRef(idx: number): { name: string; pkg: string } {
+    if (idx < 0) {
+      const imp = this.imports[-idx - 1];
+      if (!imp) return { name: "?", pkg: "?" };
+      // walk outer chain to the top import (the package name)
+      let o = imp.outer;
+      let pkg = "?";
+      for (let i = 0; i < 8 && o < 0; i++) {
+        const p = this.imports[-o - 1];
+        if (!p) break;
+        pkg = p.objectName;
+        o = p.outer;
+      }
+      return { name: imp.objectName, pkg };
+    }
+    if (idx > 0) return { name: this.exports[idx - 1]?.objectName ?? "?", pkg: "(this)" };
+    return { name: "", pkg: "" };
+  }
+
+  /**
+   * StaticMeshActor placements with their mesh reference + transform.
+   * Validated against real client maps (17_25.unr Ertheia: 2081 actors).
+   */
+  readMapPlacements(): MapPlacement[] {
+    const out: MapPlacement[] = [];
+    for (const e of this.exports) {
+      if (e.size <= 0) continue;
+      if (
+        e.className !== "StaticMeshActor" &&
+        e.className !== "L2MovableStaticMeshActor" &&
+        e.className !== "MovableStaticMeshActor"
+      )
+        continue;
+      const p = this.readProps(e);
+      const loc = p.Location as [number, number, number] | undefined;
+      const ref = p.StaticMesh as number | undefined;
+      if (!loc || ref === undefined) continue;
+      const { name, pkg } = this.resolveRef(ref);
+      if (!name || name === "?") continue;
+      const rot = (p.Rotation as [number, number, number]) ?? [0, 0, 0];
+      const TWO_PI_OVER_65536 = (Math.PI * 2) / 65536;
+      const s3 = (p.DrawScale3D as [number, number, number]) ?? [1, 1, 1];
+      out.push({
+        x: loc[0],
+        y: loc[1],
+        z: loc[2],
+        pitch: rot[0] * TWO_PI_OVER_65536,
+        yaw: rot[1] * TWO_PI_OVER_65536,
+        roll: rot[2] * TWO_PI_OVER_65536,
+        scale: (p.DrawScale as number) ?? 1,
+        scale3d: s3,
+        mesh: name,
+        pkg,
+      });
+    }
+    return out;
   }
 
   /**
@@ -490,8 +567,12 @@ export class L2Package {
       }
       if ((nm === "Location" || nm === "DrawScale3D") && dsz >= 12) {
         props[nm] = [dv.getFloat32(o, true), dv.getFloat32(o + 4, true), dv.getFloat32(o + 8, true)];
+      } else if (nm === "Rotation" && dsz >= 12) {
+        props[nm] = [dv.getInt32(o, true), dv.getInt32(o + 4, true), dv.getInt32(o + 8, true)];
       } else if (nm === "DrawScale" && dsz === 4) {
         props[nm] = dv.getFloat32(o, true);
+      } else if (nm === "StaticMesh") {
+        props[nm] = readCompat32(b, o)[0]; // object ref (compat32)
       }
       o += dsz;
     }
