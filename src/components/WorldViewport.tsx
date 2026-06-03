@@ -19,7 +19,12 @@ import { getGameConnection, type GameEvent, type WorldEntity } from "@/lib/l2-pr
 // L2 units → scene units. Lower = more zoomed in. ~3000 units → 100 scene units.
 const SCALE = 30;
 
-export function WorldViewport() {
+export interface WorldViewportProps {
+  onTargetTap?: (objectId: number) => void;
+  onGroundTap?: (x: number, y: number, z: number) => void;
+}
+
+export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps = {}) {
   const mountRef = useRef<HTMLDivElement>(null);
   const [fps, setFps] = useState(0);
   const [worldPos, setWorldPos] = useState<{ x: number; y: number; z: number } | null>(null);
@@ -119,6 +124,7 @@ export function WorldViewport() {
       if (!m) {
         m = new THREE.Mesh(npcGeom, npcMat);
         m.castShadow = true;
+        m.userData.objectId = e.objectId;
         scene.add(m);
         entityMeshes.set(e.objectId, m);
       }
