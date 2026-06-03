@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import charCreate from "@/assets/l2-client/client_char_create.png.asset.json";
+const charCreate = { url: "/hud/screens/CharCreate.png" };
 
 const RACES = ["Human", "Elf", "Dark Elf", "Orc", "Dwarf", "Kamael", "Ertheia"];
 const CLASSES: Record<string, string[]> = {

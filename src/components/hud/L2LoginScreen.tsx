@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from "react";
-import loginVideo from "@/assets/l2-client/login_client_loop.mp4.asset.json";
-import loginPoster from "@/assets/l2-client/client_login_bg.jpg.asset.json";
+const loginVideo = { url: "/hud/videos/login_web.mp4" };
+const loginPoster = { url: "/hud/screens/LogonScreen.png" };
 
 function LoginField({
   value,

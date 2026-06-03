@@ -4,7 +4,7 @@ import { L2LoginClient, type GameServer, type LoginEvent } from "@/lib/l2-protoc
 import { L2GameClient, setGameConnection, type GameEvent } from "@/lib/l2-protocol/game-client";
 import { SpriteProvider } from "@/components/hud/L2Sprite";
 import { L2LoginScreen } from "@/components/hud/L2LoginScreen";
-import serverSelect from "@/assets/l2-client/client_server_select.png.asset.json";
+const serverSelect = { url: "/hud/screens/LogonScreen.png" };
 
 const GAME_PROTOCOL = 502;
 

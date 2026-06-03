@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import charSelect from "@/assets/l2-client/client_char_select.png.asset.json";
+const charSelect = { url: "/hud/screens/CharSelect.png" };
 
 export interface CharSlot {
   name: string;
