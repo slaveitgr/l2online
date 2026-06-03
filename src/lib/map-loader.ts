@@ -24,7 +24,7 @@
  */
 import * as THREE from "three";
 import { L2Package, type MapPlacement, type L2Texture, type UExport } from "./l2-package";
-import { readIndexedMapPlacements } from "./l2-unreal-object-index";
+import { readIndexedMapPlacements, readIndexedTerrainInfos } from "./l2-unreal-object-index";
 
 export type PackageSource = (packageName: string) => Promise<ArrayBuffer | null>;
 
@@ -81,6 +81,7 @@ export async function loadMap(
   const log = opts.onProgress ?? (() => {});
 
   const map = L2Package.from(unrBytes);
+  const terrains = readIndexedTerrainInfos(map);
   const indexedPlacements = readIndexedMapPlacements(map);
   const hiddenSkipped = indexedPlacements.filter((p) => p.hidden || p.deleteMe).length;
   const placementSource: MapPlacement[] = indexedPlacements.length
@@ -91,6 +92,14 @@ export async function loadMap(
     `[map] ${placements.length} placements / ${new Set(placements.map((p) => p.pkg)).size} packages` +
       (indexedPlacements.length ? ` · ${hiddenSkipped} hidden/deleted skipped` : ""),
   );
+  if (terrains.length) {
+    const ready = terrains.filter((t) => t.terrainMap && t.quadVisibilityBitmap && t.edgeTurnBitmap).length;
+    const first = terrains[0];
+    log(
+      `[terrain] ${ready}/${terrains.length} decoded · map ${first.mapX}_${first.mapY}` +
+        (first.terrainMap ? ` · ${first.terrainMap.target.pkg}.${first.terrainMap.target.name}` : ""),
+    );
+  }
 
   const origin =
     opts.origin ??
