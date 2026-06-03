@@ -24,6 +24,7 @@ function CharacterCreate() {
           console.log("[char-create]", opts);
           navigate({ to: "/characters" });
         }}
+        renderModel={(o) => <CharacterModel race={o.race} gender={o.sex ? "F" : "M"} />}
       />
     </SpriteProvider>
   );
