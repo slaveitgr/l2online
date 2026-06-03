@@ -401,6 +401,58 @@ export class L2GameClient {
     this.sendFrame(body, this.useEncryption);
   }
 
+  // ===== Public action senders (mobile HUD / future desktop input) =====
+  // Opcodes follow the common L2J Interlude-ish convention. On builds with
+  // shuffled client opcodes, adjust the first u8 — packet bodies stay the same.
+
+  /** RequestMoveBackwardToLocation (0x01): destination + origin in L2 world coords. */
+  sendMoveTo(x: number, y: number, z: number) {
+    if (!this.connected) return;
+    const p = this._player;
+    const ox = p?.x ?? x;
+    const oy = p?.y ?? y;
+    const oz = p?.z ?? z;
+    const body = new PacketWriter()
+      .u8(0x01)
+      .u32(x | 0).u32(y | 0).u32(z | 0)
+      .u32(ox | 0).u32(oy | 0).u32(oz | 0)
+      .u32(0)
+      .build();
+    this.sendFrame(body, this.useEncryption);
+  }
+
+  /** RequestAction (0x04): click-to-target / talk-to-NPC / interact. */
+  sendAction(objectId: number, shift = false) {
+    if (!this.connected) return;
+    const p = this._player;
+    const body = new PacketWriter()
+      .u8(0x04)
+      .u32(objectId)
+      .u32((p?.x ?? 0) | 0)
+      .u32((p?.y ?? 0) | 0)
+      .u32((p?.z ?? 0) | 0)
+      .u8(shift ? 1 : 0)
+      .build();
+    this.sendFrame(body, this.useEncryption);
+  }
+
+  /** RequestAttack — modelled as forced Action (shift=true). */
+  sendAttack(objectId: number) {
+    this.sendAction(objectId, true);
+  }
+
+  /** Say2 (0x49): channel 0 = ALL. */
+  sendSay(text: string, channel = 0) {
+    if (!this.connected || !text) return;
+    const body = new PacketWriter()
+      .u8(0x49)
+      .str(text)
+      .u32(channel)
+      .str("")
+      .build();
+    this.sendFrame(body, this.useEncryption);
+  }
+
   // ===== Parsing: roster =====
 
   private parseCharSelectionInfo(body: Uint8Array) {
