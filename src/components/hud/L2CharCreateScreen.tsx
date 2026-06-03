@@ -149,7 +149,7 @@ export function L2CharCreateScreen({
       </div>
 
 
-      <div style={{ position: "absolute", left: 42, top: 58, width: 265, color: "#e8d7b0", textShadow: "0 2px 6px rgba(0,0,0,0.65)" }}>
+      <div style={{ position: "absolute", left: 42, top: 100, width: 290, color: "#e8d7b0", textShadow: "0 2px 6px rgba(0,0,0,0.65)" }}>
         <div style={{ fontSize: 30, fontStyle: "italic", color: "#d8b464", marginBottom: 14 }}>{race}</div>
         <div style={{ fontSize: 16, lineHeight: 1.55, color: "rgba(255,255,255,0.82)" }}>{RACE_DESCRIPTIONS[race]}</div>
         <div style={{ marginTop: 24, fontSize: 16, color: "#f0d27f" }}>Race Characteristics</div>
