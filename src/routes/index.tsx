@@ -270,6 +270,29 @@ function Launcher() {
         <a href="http://l2.slave.gr/forgot-password" target="_blank" rel="noreferrer" className="l2-corner-link">Lost Account <span className="opacity-60">↗</span></a>
         <a href="https://l2.slave.gr" target="_blank" rel="noreferrer" className="l2-corner-link">Links <span className="opacity-60">↗</span></a>
         <Link to="/cdn-cache" className="l2-corner-link">Settings <span className="opacity-60">↗</span></Link>
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              if ("caches" in window) {
+                const keys = await caches.keys();
+                await Promise.all(keys.map((k) => caches.delete(k)));
+              }
+              if ("serviceWorker" in navigator) {
+                const regs = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(regs.map((r) => r.unregister()));
+              }
+              try { sessionStorage.clear(); } catch { /* ignore */ }
+            } catch { /* ignore */ }
+            const url = new URL(window.location.href);
+            url.searchParams.set("_t", Date.now().toString());
+            window.location.replace(url.toString());
+          }}
+          className="l2-corner-link"
+          title="Clear cache and reload"
+        >
+          Update <span className="opacity-60">⟳</span>
+        </button>
       </div>
 
 
