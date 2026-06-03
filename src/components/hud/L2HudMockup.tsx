@@ -402,7 +402,7 @@ export function L2HudMockup({
         />
 
         {activeChar ? <StatusBox char={activeChar} /> : null}
-        <ChatLog lines={chatLines} />
+        <ChatLog lines={chatLines} onSend={onSendChat} />
 
 
 
