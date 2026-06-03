@@ -43,19 +43,28 @@ const DXT_FORMAT: Record<string, number> = {
   DXT5: THREE.RGBA_S3TC_DXT5_Format,
 };
 
-function toCompressedTexture(t: L2Texture): THREE.Texture | null {
-  const fmt = DXT_FORMAT[t.format];
-  if (!fmt) return null; // P8/RGBA8/G16 → handled later (CPU decode path)
-  const tex = new THREE.CompressedTexture(
-    [{ data: t.data, width: t.width, height: t.height } as unknown as ImageData],
-    t.width,
-    t.height,
-    fmt as THREE.CompressedPixelFormat,
-  );
+function toThreeTexture(t: L2Texture): THREE.Texture | null {
+  const dxt = DXT_FORMAT[t.format];
+  let tex: THREE.Texture;
+  if (dxt) {
+    // DXT1/3/5 → upload compressed straight to the GPU
+    tex = new THREE.CompressedTexture(
+      [{ data: t.data, width: t.width, height: t.height } as unknown as ImageData],
+      t.width,
+      t.height,
+      dxt as THREE.CompressedPixelFormat,
+    );
+  } else if (t.format === "RGBA8") {
+    // readTexture already swizzled BGRA→RGBA → plain DataTexture
+    tex = new THREE.DataTexture(t.data, t.width, t.height, THREE.RGBAFormat);
+  } else {
+    return null; // P8/G16 not yet supported for world textures
+  }
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.minFilter = THREE.LinearFilter;
   tex.magFilter = THREE.LinearFilter;
+  tex.flipY = false;
   tex.needsUpdate = true;
   return tex;
 }
@@ -121,7 +130,7 @@ export async function loadMap(
     if (texCache.has(cacheKey)) return texCache.get(cacheKey)!;
     if (e.className === "Texture") {
       const t = pkg.readTexture(e);
-      const tex = t ? toCompressedTexture(t) : null;
+      const tex = t ? toThreeTexture(t) : null;
       texCache.set(cacheKey, tex);
       return tex;
     }
