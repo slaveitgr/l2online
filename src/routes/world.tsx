@@ -232,6 +232,15 @@ function WorldPage() {
             activeChar={char ?? undefined}
             chatLines={chat}
             onExit={leaveWorld}
+            onSendChat={(text) => {
+              const conn = getGameConnection();
+              if (!conn) return;
+              conn.sendSay(text);
+              setChat((c) => [
+                ...c,
+                { color: "#f6ecc8", text: `${char?.name ?? "You"}: ${text}` },
+              ]);
+            }}
           />
         )}
       </SpriteProvider>
