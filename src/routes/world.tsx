@@ -22,7 +22,9 @@ import {
   useSelectedTarget,
   getSelectedTarget,
   setSelectedTarget,
+  setDialogTarget,
 } from "@/lib/game-state";
+import { NpcDialog, NpcInteractPrompt } from "@/components/hud/NpcDialog";
 
 export const Route = createFileRoute("/world")({
   head: () => ({
