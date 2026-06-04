@@ -216,6 +216,11 @@ function WorldPage() {
       <WorldViewport
         onTargetTap={(id) => getGameConnection()?.sendAction(id)}
         onGroundTap={(x, y, z) => getGameConnection()?.sendMoveTo(x, y, z)}
+        onLoadProgress={(pct, msg) => {
+          setLoadPct((prev) => (pct > prev ? pct : prev));
+          setLoadMsg(msg);
+        }}
+        onReady={() => setReady(true)}
       />
 
       <SpriteProvider>
