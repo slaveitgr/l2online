@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { listFiles, getManifest, getCacheStats, getFile, formatBytes, type CachedFileMeta } from "@/lib/l2-assets";
 import { listMountFiles, readFromMount } from "@/lib/local-mount";
-import { L2Package } from "@/lib/l2-package";
 import { loadMap } from "@/lib/map-loader";
 import { getGameConnection, type GameEvent, type WorldEntity } from "@/lib/l2-protocol/game-client";
 import { setSelectedTarget } from "@/lib/game-state";
@@ -342,6 +341,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     // ── Map layer (real L2 .unr) ─────────────────────────────────────────
     const mapDisposables: Array<{ dispose: () => void }> = [];
     let mapGroup: THREE.Group | null = null;
+    let tileTimer = 0;
 
     // ── Asset loader hook (reads cached client) ──────────────────────────
     (async () => {
@@ -371,34 +371,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       else if (maps.length > 0) setLoadStatus(`Found ${maps.length} maps · loading sector…`);
       else setLoadStatus("No cache found · checking mounted client folder…");
 
-      // Try preferred sectors first, then any cached map. Mount → cache fallback.
-      const candidates = ["Maps/22_22.unr", "maps/22_22.unr", "Maps/17_25.unr", "maps/17_25.unr", ...maps.map((m) => m.path)];
-      let pkg: L2Package | null = null;
-      let pickedPath = "";
-      let unrBytes: Uint8Array | null = null;
-      for (const path of candidates) {
-        try {
-          const bytes = (await readFromMount(path)) ?? (await getFile(path));
-          if (!bytes) continue;
-          pkg = L2Package.from(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
-          pickedPath = path;
-          unrBytes = bytes;
-          break;
-        } catch (err) {
-          console.warn("[map] failed to parse", path, err);
-        }
-      }
-      if (!pkg || !unrBytes) { setLoadStatus("No parsable .unr available (mount or cache)."); return; }
-
-      const actors = pkg.readActorPlacements();
-      const spawns = pkg.readActorPlacements(["PlayerStart"]);
-      console.log("[map]", pickedPath, "classes:", pkg.classHistogram());
-      setMapInfo({ path: pickedPath, actors: actors.length, spawns: spawns.length });
-      setLoadStatus(`${pickedPath} · ${actors.length} actors · ${spawns.length} spawns`);
-
-      if (actors.length === 0) return;
-
-      // Phase 3: assemble REAL meshes from .usx packages — read live from mount first.
+      // ── Shared package source (mount → cache) used by every tile ─────────
       const bytesForPath = async (path: string): Promise<ArrayBuffer | null> => {
         try {
           const b = (await readFromMount(path)) ?? (await getFile(path));
@@ -413,64 +386,112 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         const base = f.path.split("/").pop()!.replace(/\.usx$/i, "").toLowerCase();
         meshIndex.set(base, f.path);
       }
-
-      try {
-        mapGroup = await loadMap(
-          unrBytes.buffer.slice(unrBytes.byteOffset, unrBytes.byteOffset + unrBytes.byteLength) as ArrayBuffer,
-          async (pkgName) => {
-            // Try mount → cache, across StaticMeshes/.usx, Textures/.utx, SysTextures/.utx.
-            for (const p of [
-              `StaticMeshes/${pkgName}.usx`,
-              `staticmeshes/${pkgName}.usx`,
-              `Textures/${pkgName}.utx`,
-              `textures/${pkgName}.utx`,
-              `SysTextures/${pkgName}.utx`,
-              `systextures/${pkgName}.utx`,
-            ]) {
-              const buf = await bytesForPath(p);
-              if (buf) return buf;
-            }
-            const indexed = meshIndex.get(pkgName.toLowerCase());
-            return indexed ? await bytesForPath(indexed) : null;
-          },
-          {
-            scale: SCALE,
-            // Anchor the static map to the SAME origin as the player/entities so the
-            // buildings render around the player instead of around the map centroid.
-            origin: { x: origin.x, y: origin.y, z: origin.z },
-            onProgress: (msg) => {
-              console.log(msg);
-              setLoadStatus(msg);
-            },
-          },
-        );
-        scene.add(mapGroup);
-        // NOTE: keep the flat placeholder ground VISIBLE as a backstop. Hiding it where
-        // the map's terrain doesn't fully cover the plaza let the sky background show
-        // through as large light-blue voids. Real textured floor = terrain-layer task.
-        setLoadStatus(`${pickedPath} · meshes assembled`);
-      } catch (err) {
-        console.error("[map] assemble failed, falling back to markers", err);
-        // Fallback: spawn markers only so the player still sees something.
-        const cx = actors.reduce((s, a) => s + a.x, 0) / actors.length;
-        const cy = actors.reduce((s, a) => s + a.y, 0) / actors.length;
-        const cz = actors.reduce((s, a) => s + a.z, 0) / actors.length;
-        mapGroup = new THREE.Group();
-        if (spawns.length) {
-          const sg = new THREE.ConeGeometry(1.2, 3, 6);
-          const sm = new THREE.MeshStandardMaterial({ color: 0x3fdc6a, emissive: 0x114420 });
-          const sInst = new THREE.InstancedMesh(sg, sm, spawns.length);
-          const m = new THREE.Matrix4();
-          spawns.forEach((a, i) => {
-            m.makeTranslation((a.x - cx) / SCALE, (a.z - cz) / SCALE + 1.5, (a.y - cy) / SCALE);
-            sInst.setMatrixAt(i, m);
-          });
-          sInst.instanceMatrix.needsUpdate = true;
-          mapGroup.add(sInst);
-          mapDisposables.push(sg, sm);
+      const getPackage = async (pkgName: string): Promise<ArrayBuffer | null> => {
+        for (const p of [
+          `StaticMeshes/${pkgName}.usx`, `staticmeshes/${pkgName}.usx`,
+          `Textures/${pkgName}.utx`, `textures/${pkgName}.utx`,
+          `SysTextures/${pkgName}.utx`, `systextures/${pkgName}.utx`,
+        ]) {
+          const buf = await bytesForPath(p);
+          if (buf) return buf;
         }
-        scene.add(mapGroup);
-      }
+        const indexed = meshIndex.get(pkgName.toLowerCase());
+        return indexed ? await bytesForPath(indexed) : null;
+      };
+
+      // pre-baked terrain splatmaps (public/terrain/<tile>.png) — one texture per tile
+      const texLoader = new THREE.TextureLoader();
+      const bakedCache = new Map<string, Promise<THREE.Texture | null>>();
+      const loadBakedTerrain = (mx: number, my: number): Promise<THREE.Texture | null> => {
+        const key = `${mx}_${my}`;
+        if (!bakedCache.has(key)) {
+          bakedCache.set(
+            key,
+            new Promise<THREE.Texture | null>((resolve) => {
+              texLoader.load(`/terrain/${key}.png`, (t) => resolve(t), undefined, () => resolve(null));
+            }),
+          );
+        }
+        return bakedCache.get(key)!;
+      };
+
+      // ── Tile streaming: load the .unr under the player + its neighbours ──
+      // L2 world → map tile: tileX = floor(x/32768)+20, tileY = floor(y/32768)+18.
+      const TILE_UNITS = 32768;
+      const RADIUS = 1; // 3×3 ring around the player
+      const mapsRoot = new THREE.Group();
+      mapsRoot.name = "L2Tiles";
+      scene.add(mapsRoot);
+      mapGroup = mapsRoot; // tracked for cleanup
+      const loadedTiles = new Map<string, THREE.Group>();
+      const loadingTiles = new Set<string>();
+      let currentTileKey = "";
+      let firstTileLoaded = false;
+
+      const playerWorld = () => ({
+        x: playerScenePos.x * SCALE + origin.x,
+        y: -playerScenePos.z * SCALE + origin.y,
+      });
+      const tileOf = (wx: number, wy: number) => ({
+        tx: Math.floor(wx / TILE_UNITS) + 20,
+        ty: Math.floor(wy / TILE_UNITS) + 18,
+      });
+
+      const loadTile = async (tx: number, ty: number) => {
+        const key = `${tx}_${ty}`;
+        if (loadedTiles.has(key) || loadingTiles.has(key)) return;
+        loadingTiles.add(key);
+        let bytes: Uint8Array | null = null;
+        for (const p of [`Maps/${tx}_${ty}.unr`, `maps/${tx}_${ty}.unr`]) {
+          bytes = (await readFromMount(p)) ?? (await getFile(p));
+          if (bytes) break;
+        }
+        if (!bytes) { loadingTiles.delete(key); return; }
+        try {
+          const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+          const g = await loadMap(ab, getPackage, {
+            scale: SCALE,
+            origin: { x: origin.x, y: origin.y, z: origin.z },
+            bakedTerrain: loadBakedTerrain,
+            onProgress: (msg) => { if (!firstTileLoaded) setLoadStatus(msg); },
+          });
+          if (!loadingTiles.has(key)) { /* unloaded mid-flight */ } else {
+            mapsRoot.add(g);
+            loadedTiles.set(key, g);
+            firstTileLoaded = true;
+            setMapInfo({ path: `Maps/${key}.unr`, actors: g.userData.meshCount ?? 0, spawns: loadedTiles.size });
+            setLoadStatus(`tiles: ${[...loadedTiles.keys()].join(", ")}`);
+          }
+        } catch (err) {
+          console.warn("[tile] failed", key, err);
+        }
+        loadingTiles.delete(key);
+      };
+
+      const updateTiles = () => {
+        const { x, y } = playerWorld();
+        const { tx, ty } = tileOf(x, y);
+        const ck = `${tx}_${ty}`;
+        if (ck === currentTileKey) return;
+        currentTileKey = ck;
+        // load current first, then the ring
+        loadTile(tx, ty);
+        for (let dx = -RADIUS; dx <= RADIUS; dx++)
+          for (let dy = -RADIUS; dy <= RADIUS; dy++)
+            if (dx || dy) loadTile(tx + dx, ty + dy);
+        // unload tiles outside the window
+        for (const [key, g] of loadedTiles) {
+          const [kx, ky] = key.split("_").map(Number);
+          if (Math.abs(kx - tx) > RADIUS || Math.abs(ky - ty) > RADIUS) {
+            mapsRoot.remove(g);
+            loadedTiles.delete(key);
+            g.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry) m.geometry.dispose(); });
+          }
+        }
+      };
+
+      updateTiles(); // initial (player enter tile)
+      tileTimer = window.setInterval(updateTiles, 1200); // re-check as the player moves
     })().catch((err) => {
       console.error("[map] loader failed", err);
       setLoadStatus(`Map load failed: ${(err as Error).message}`);
@@ -478,6 +499,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
 
     return () => {
       cancelAnimationFrame(raf);
+      if (tileTimer) clearInterval(tileTimer);
       unsub?.();
       window.removeEventListener("resize", onResize);
       renderer.domElement.removeEventListener("pointerdown", onDown);
