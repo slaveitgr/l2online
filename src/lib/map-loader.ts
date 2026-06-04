@@ -72,7 +72,7 @@ function toThreeTexture(t: L2Texture): THREE.Texture | null {
   return tex;
 }
 
-function buildTerrainGeometry(terrain: IndexedTerrainInfo, heightmap: L2Texture): { geometry: THREE.BufferGeometry; width: number; height: number } | null {
+function buildTerrainGeometry(terrain: IndexedTerrainInfo, heightmap: L2Texture, origin: { x: number; y: number; z: number }): { geometry: THREE.BufferGeometry; width: number; height: number } | null {
   if (heightmap.format !== "G16" || heightmap.width < 2 || heightmap.height < 2) return null;
   if (heightmap.data.byteLength < heightmap.width * heightmap.height * 2) return null;
 
@@ -93,9 +93,11 @@ function buildTerrainGeometry(terrain: IndexedTerrainInfo, heightmap: L2Texture)
     for (let x = 0; x < width; x++) {
       const i = x + y * width;
       const h = dv.getUint16(i * 2, true);
-      positions[i * 3] = baseX + x * sx;
-      positions[i * 3 + 1] = baseY + y * sy;
-      positions[i * 3 + 2] = baseZ + h * sz;
+      // subtract the scene origin (same frame as the static-mesh placements) so the
+      // terrain lands UNDER the player instead of at absolute world coords far away.
+      positions[i * 3] = baseX + x * sx - origin.x;
+      positions[i * 3 + 1] = baseY + y * sy - origin.y;
+      positions[i * 3 + 2] = baseZ + h * sz - origin.z;
       uvs[i * 2] = x / Math.max(1, width - 1);
       uvs[i * 2 + 1] = y / Math.max(1, height - 1);
     }
@@ -254,7 +256,7 @@ export async function loadMap(
     if (!terrain.terrainMap) continue;
     const hmPkg = await getPkg(terrain.terrainMap.target.pkg);
     const heightmap = hmPkg?.readTexture(terrain.terrainMap.target.name);
-    const built = heightmap ? buildTerrainGeometry(terrain, heightmap) : null;
+    const built = heightmap ? buildTerrainGeometry(terrain, heightmap, origin) : null;
     if (!built) continue;
     const { geometry, width } = built;
 
