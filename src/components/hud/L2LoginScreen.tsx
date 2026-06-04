@@ -7,7 +7,7 @@
  * Renders centered over the looping login video; chrome (logos, side links)
  * comes from L2LauncherShell.
  */
-import { useState, type CSSProperties } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { L2LauncherShell } from "./L2LauncherShell";
 
 const textShadow = "0 1px 2px #000, 0 0 4px #000";
@@ -79,7 +79,7 @@ function L2DialogButton({
   disabled,
   style,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   onClick?: () => void;
   disabled?: boolean;
   style?: CSSProperties;
@@ -99,7 +99,7 @@ function L2DialogButton({
         color: disabled ? "#7a7058" : "#e6dcb6",
         fontFamily: "Arial, Helvetica, sans-serif",
         fontSize: 12,
-        letterSpacing: 0.5,
+        letterSpacing: 0,
         textShadow,
         cursor: disabled ? "default" : "pointer",
         ...style,
@@ -110,10 +110,40 @@ function L2DialogButton({
   );
 }
 
+function StatusLog({ lines }: { lines?: string[] }) {
+  const visible = (lines ?? []).slice(-5);
+  if (!visible.length) return null;
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        width: 360,
+        maxWidth: "80vw",
+        padding: "6px 8px",
+        background: "rgba(0,0,0,0.45)",
+        border: "1px solid rgba(132,107,58,0.55)",
+        color: "#cfc6a4",
+        fontFamily: "Arial, Helvetica, sans-serif",
+        fontSize: 11,
+        lineHeight: 1.35,
+        textAlign: "left",
+        textShadow,
+      }}
+    >
+      {visible.map((line, idx) => (
+        <div key={`${idx}-${line}`} style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {line}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function L2LoginScreen({
   onLogin,
   error,
   busy,
+  statusLog,
 }: {
   onLogin?: (id: string, pw: string) => void;
   error?: string | null;
@@ -159,7 +189,7 @@ export function L2LoginScreen({
         />
         <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
           <L2DialogButton onClick={submit} disabled={busy || !id.trim()}>
-            {busy ? "…" : "Log In"}
+            {busy ? "..." : "Log In"}
           </L2DialogButton>
           <L2DialogButton
             onClick={() => {
@@ -183,6 +213,7 @@ export function L2LoginScreen({
             {error}
           </div>
         ) : null}
+        <StatusLog lines={statusLog} />
       </div>
     </L2LauncherShell>
   );
