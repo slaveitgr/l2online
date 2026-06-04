@@ -447,24 +447,16 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       const moved = Math.hypot(dx, dy);
       const dt = performance.now() - downT;
       if (moved < 6 && dt < 350) {
+        const id = pickNpcAt(e.clientX, e.clientY);
+        if (id !== null) {
+          setSelectedTarget(id);
+          onTargetTap?.(id);
+          return;
+        }
         const rect = renderer.domElement.getBoundingClientRect();
         ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera(ndc, camera);
-        const targets: THREE.Object3D[] = Array.from(entityMeshes.values());
-        for (const em of entityModels.values()) if (em.handle) targets.push(em.handle.group);
-        const npcHits = raycaster.intersectObjects(targets, true);
-        if (npcHits.length > 0) {
-          // walk up to the object that carries an objectId (model groups tag the root)
-          let o: THREE.Object3D | null = npcHits[0].object;
-          while (o && o.userData?.objectId === undefined) o = o.parent;
-          const id = o?.userData?.objectId as number | undefined;
-          if (typeof id === "number") {
-            setSelectedTarget(id);
-            onTargetTap?.(id);
-            return;
-          }
-        }
         const groundHits = raycaster.intersectObject(terrain, false);
         if (groundHits.length > 0) {
           const p = groundHits[0].point;
