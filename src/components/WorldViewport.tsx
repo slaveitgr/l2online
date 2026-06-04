@@ -23,9 +23,15 @@ const SCALE = 30;
 export interface WorldViewportProps {
   onTargetTap?: (objectId: number) => void;
   onGroundTap?: (x: number, y: number, z: number) => void;
+  onLoadProgress?: (percent: number, message: string) => void;
+  onReady?: () => void;
 }
 
-export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps = {}) {
+export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onReady }: WorldViewportProps = {}) {
+  const onLoadProgressRef = useRef(onLoadProgress);
+  const onReadyRef = useRef(onReady);
+  onLoadProgressRef.current = onLoadProgress;
+  onReadyRef.current = onReady;
   const mountRef = useRef<HTMLDivElement>(null);
   const [fps, setFps] = useState(0);
   const [worldPos, setWorldPos] = useState<{ x: number; y: number; z: number } | null>(null);
