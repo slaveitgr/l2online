@@ -9,6 +9,7 @@ import {
 import { SpriteProvider } from "@/components/hud/L2Sprite";
 import { MobileGameHud } from "@/components/mobile/MobileGameHud";
 import { RotateDeviceOverlay } from "@/components/mobile/RotateDeviceOverlay";
+import { WorldPreloader } from "@/components/WorldPreloader";
 import { useIsMobileGame } from "@/hooks/useIsMobileGame";
 import { lockLandscape } from "@/lib/mobile/orientation";
 import {
@@ -56,6 +57,15 @@ function WorldPage() {
   const [packetCount, setPacketCount] = useState(0);
   const { isMobile, isLandscape } = useIsMobileGame();
   const targetId = useSelectedTarget();
+  const [ready, setReady] = useState(false);
+  const [loadPct, setLoadPct] = useState(0);
+  const [loadMsg, setLoadMsg] = useState("Initializing…");
+
+  useEffect(() => {
+    if (ready) return;
+    const t = setTimeout(() => setReady(true), 20000);
+    return () => clearTimeout(t);
+  }, [ready]);
 
   const joyRef = useRef<{ dx: number; dy: number; timer: ReturnType<typeof setInterval> | null }>({
     dx: 0,
@@ -212,6 +222,11 @@ function WorldPage() {
       <WorldViewport
         onTargetTap={(id) => getGameConnection()?.sendAction(id)}
         onGroundTap={(x, y, z) => getGameConnection()?.sendMoveTo(x, y, z)}
+        onLoadProgress={(pct, msg) => {
+          setLoadPct((prev) => (pct > prev ? pct : prev));
+          setLoadMsg(msg);
+        }}
+        onReady={() => setReady(true)}
       />
 
       <SpriteProvider>
@@ -246,6 +261,10 @@ function WorldPage() {
       <div className="absolute top-1.5 left-1/2 -translate-x-1/2 text-[8px] font-mono text-muted-foreground tracking-widest pointer-events-none z-50">
         L2SLAVE · {char?.name ?? "—"} · pkts {packetCount}
       </div>
+
+      {!ready && (
+        <WorldPreloader percent={loadPct} message={loadMsg} charName={char?.name} />
+      )}
     </div>
   );
 }

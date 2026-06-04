@@ -23,9 +23,15 @@ const SCALE = 30;
 export interface WorldViewportProps {
   onTargetTap?: (objectId: number) => void;
   onGroundTap?: (x: number, y: number, z: number) => void;
+  onLoadProgress?: (percent: number, message: string) => void;
+  onReady?: () => void;
 }
 
-export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps = {}) {
+export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onReady }: WorldViewportProps = {}) {
+  const onLoadProgressRef = useRef(onLoadProgress);
+  const onReadyRef = useRef(onReady);
+  onLoadProgressRef.current = onLoadProgress;
+  onReadyRef.current = onReady;
   const mountRef = useRef<HTMLDivElement>(null);
   const [fps, setFps] = useState(0);
   const [worldPos, setWorldPos] = useState<{ x: number; y: number; z: number } | null>(null);
@@ -346,6 +352,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     // ── Asset loader hook (reads cached client) ──────────────────────────
     (async () => {
       setLoadStatus("Reading mounted/cached client…");
+      onLoadProgressRef.current?.(5, "Reading mounted/cached client…");
       const [manifest, stats] = await Promise.all([getManifest().catch(() => null), getCacheStats().catch(() => null)]);
       const rootName = manifest?.rootName ?? "CDN cache";
       const [cachedMaps, mountedMaps, cachedTextures, mountedTextures, cachedMeshes, mountedMeshes] = await Promise.all([
@@ -366,10 +373,11 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       const textures = Math.max(cachedTextures.length, mountedTextures.length);
       const meshes = Math.max(cachedMeshes.length, mountedMeshes.length);
       setAssetSummary({ rootName: mountedMaps.length ? "Mounted client" : rootName, maps, textures, meshes });
-      if (stats && stats.cachedFiles > 0)
-        setLoadStatus(`${stats.cachedFiles}/${stats.totalFiles} files cached · ${formatBytes(stats.cachedBytes)}`);
-      else if (maps.length > 0) setLoadStatus(`Found ${maps.length} maps · loading sector…`);
-      else setLoadStatus("No cache found · checking mounted client folder…");
+      const assetsMsg = stats && stats.cachedFiles > 0
+        ? `${stats.cachedFiles}/${stats.totalFiles} files cached · ${formatBytes(stats.cachedBytes)}`
+        : maps.length > 0 ? `Found ${maps.length} maps · loading sector…` : "No cache found · checking mounted client folder…";
+      setLoadStatus(assetsMsg);
+      onLoadProgressRef.current?.(25, assetsMsg);
 
       // ── Shared package source (mount → cache) used by every tile ─────────
       const bytesForPath = async (path: string): Promise<ArrayBuffer | null> => {
@@ -449,18 +457,30 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         if (!bytes) { loadingTiles.delete(key); return; }
         try {
           const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+          let pct = 30;
           const g = await loadMap(ab, getPackage, {
             scale: SCALE,
             origin: { x: origin.x, y: origin.y, z: origin.z },
             bakedTerrain: loadBakedTerrain,
-            onProgress: (msg) => { if (!firstTileLoaded) setLoadStatus(msg); },
+            onProgress: (msg) => {
+              if (!firstTileLoaded) {
+                setLoadStatus(msg);
+                pct = Math.min(95, pct + 3);
+                onLoadProgressRef.current?.(pct, msg);
+              }
+            },
           });
           if (!loadingTiles.has(key)) { /* unloaded mid-flight */ } else {
             mapsRoot.add(g);
             loadedTiles.set(key, g);
+            const wasFirst = !firstTileLoaded;
             firstTileLoaded = true;
             setMapInfo({ path: `Maps/${key}.unr`, actors: g.userData.meshCount ?? 0, spawns: loadedTiles.size });
             setLoadStatus(`tiles: ${[...loadedTiles.keys()].join(", ")}`);
+            if (wasFirst) {
+              onLoadProgressRef.current?.(100, "Ready");
+              onReadyRef.current?.();
+            }
           }
         } catch (err) {
           console.warn("[tile] failed", key, err);
@@ -495,6 +515,8 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     })().catch((err) => {
       console.error("[map] loader failed", err);
       setLoadStatus(`Map load failed: ${(err as Error).message}`);
+      onLoadProgressRef.current?.(100, "Map load failed");
+      onReadyRef.current?.();
     });
 
     return () => {
