@@ -58,13 +58,13 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.1;
+    renderer.toneMappingExposure = 1.0;
     mount.appendChild(renderer.domElement);
 
     // ── Lighting (neutral daylight) ──────────────────────────────────────
     // Sky/ground hemisphere lifts untextured surfaces without the old red/blue cast.
-    scene.add(new THREE.HemisphereLight(0xdce8f7, 0x6f6048, 1.15));
-    const sun = new THREE.DirectionalLight(0xfff3da, 1.55);
+    scene.add(new THREE.HemisphereLight(0xdce8f7, 0x6f6048, 0.95));
+    const sun = new THREE.DirectionalLight(0xfff3da, 1.3);
     sun.position.set(120, 200, 90);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
