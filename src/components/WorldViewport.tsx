@@ -352,6 +352,7 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
     // ── Asset loader hook (reads cached client) ──────────────────────────
     (async () => {
       setLoadStatus("Reading mounted/cached client…");
+      onLoadProgressRef.current?.(5, "Reading mounted/cached client…");
       const [manifest, stats] = await Promise.all([getManifest().catch(() => null), getCacheStats().catch(() => null)]);
       const rootName = manifest?.rootName ?? "CDN cache";
       const [cachedMaps, mountedMaps, cachedTextures, mountedTextures, cachedMeshes, mountedMeshes] = await Promise.all([
@@ -372,10 +373,11 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
       const textures = Math.max(cachedTextures.length, mountedTextures.length);
       const meshes = Math.max(cachedMeshes.length, mountedMeshes.length);
       setAssetSummary({ rootName: mountedMaps.length ? "Mounted client" : rootName, maps, textures, meshes });
-      if (stats && stats.cachedFiles > 0)
-        setLoadStatus(`${stats.cachedFiles}/${stats.totalFiles} files cached · ${formatBytes(stats.cachedBytes)}`);
-      else if (maps.length > 0) setLoadStatus(`Found ${maps.length} maps · loading sector…`);
-      else setLoadStatus("No cache found · checking mounted client folder…");
+      const assetsMsg = stats && stats.cachedFiles > 0
+        ? `${stats.cachedFiles}/${stats.totalFiles} files cached · ${formatBytes(stats.cachedBytes)}`
+        : maps.length > 0 ? `Found ${maps.length} maps · loading sector…` : "No cache found · checking mounted client folder…";
+      setLoadStatus(assetsMsg);
+      onLoadProgressRef.current?.(25, assetsMsg);
 
       // ── Shared package source (mount → cache) used by every tile ─────────
       const bytesForPath = async (path: string): Promise<ArrayBuffer | null> => {
