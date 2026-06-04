@@ -530,7 +530,9 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
       tileTimer = window.setInterval(updateTiles, 1200); // re-check as the player moves
     })().catch((err) => {
       console.error("[map] loader failed", err);
-      setLoadStatus(`Map load failed: ${(err as Error).message}`);
+      setLoadStatus(`Map load failed: ${(err as Error).message}`, 100);
+      onReadyRef.current?.();
+
     });
 
     return () => {
