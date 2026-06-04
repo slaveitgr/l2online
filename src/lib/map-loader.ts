@@ -65,6 +65,8 @@ function toThreeTexture(t: L2Texture): THREE.Texture | null {
   tex.magFilter = THREE.LinearFilter;
   tex.flipY = false;
   tex.needsUpdate = true;
+  // remember the source format so the material can decide on alpha-test (cutout) safely
+  tex.userData.l2format = t.format;
   return tex;
 }
 
@@ -274,15 +276,16 @@ export async function loadMap(
         if (ref != null) {
           const tex = await resolveTexture(usx, ref);
           if (tex) {
-            // alphaTest cuts out foliage/banner/cloth cards (their texture's transparent
-            // areas otherwise render as opaque white "shards"). Opaque walls keep alpha=255
-            // so nothing is discarded. side=Double so thin leaf/cloth cards show both faces.
+            // Only DXT1 carries 1-bit punch-through alpha (foliage/banner cutouts). Apply
+            // alpha-test + double-side ONLY there; DXT3/DXT5/RGBA8 keep their gradient alpha
+            // opaque so water/translucent ground doesn't get punched into holes.
+            const cutout = tex.userData?.l2format === "DXT1";
             material = new THREE.MeshStandardMaterial({
               map: tex,
               roughness: 0.95,
               metalness: 0,
-              alphaTest: 0.4,
-              side: THREE.DoubleSide,
+              alphaTest: cutout ? 0.5 : 0,
+              side: cutout ? THREE.DoubleSide : THREE.FrontSide,
             });
           }
         }
