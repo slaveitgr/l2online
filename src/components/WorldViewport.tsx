@@ -23,27 +23,14 @@ const SCALE = 30;
 export interface WorldViewportProps {
   onTargetTap?: (objectId: number) => void;
   onGroundTap?: (x: number, y: number, z: number) => void;
-  onLoadProgress?: (pct: number, msg: string) => void;
-  onReady?: () => void;
 }
 
-export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onReady }: WorldViewportProps = {}) {
-  const onLoadProgressRef = useRef(onLoadProgress);
-  const onReadyRef = useRef(onReady);
-  onLoadProgressRef.current = onLoadProgress;
-  onReadyRef.current = onReady;
-
+export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps = {}) {
   const mountRef = useRef<HTMLDivElement>(null);
   const [fps, setFps] = useState(0);
   const [worldPos, setWorldPos] = useState<{ x: number; y: number; z: number } | null>(null);
   const [entityCount, setEntityCount] = useState(0);
-  const [loadStatus, setLoadStatusRaw] = useState("Initializing…");
-  const setLoadStatus = (msg: string, pct?: number) => {
-    setLoadStatusRaw(msg);
-    if (pct != null) onLoadProgressRef.current?.(pct, msg);
-    else onLoadProgressRef.current?.(-1 as number, msg);
-  };
-
+  const [loadStatus, setLoadStatus] = useState("Initializing…");
   const [assetSummary, setAssetSummary] = useState<{
     rootName: string;
     maps: CachedFileMeta[];
@@ -163,13 +150,61 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
     playerRing.position.y = 0.1;
     scene.add(playerRing);
 
-    // NPC / other-entity markers — a humanoid capsule (clearer than the old cone).
-    // (Full per-NPC .ukx models reuse the character pipeline — separate track.)
+    // L2 Race enum ordinal → extracted-model race name (Mobius Race order).
+    const RACE_BY_ORDINAL = ["Human", "Elf", "Dark Elf", "Orc", "Dwarf", "Kamael", "Ertheia", "Sylph"];
+
+    // NPC markers — a humanoid capsule (NPCs, until real .ukx NPC meshes ship).
+    // OTHER PLAYERS get their real race/gender body model (clothed Fighter body).
     const npcGeom = new THREE.CapsuleGeometry(0.7, 2.0, 6, 12);
     const npcMat = new THREE.MeshStandardMaterial({ color: 0xb5483a, roughness: 0.7 });
-    const entityMeshes = new Map<number, THREE.Mesh>();
+    const entityMeshes = new Map<number, THREE.Mesh>(); // capsules (NPCs)
+
+    interface EntityModel {
+      handle: CharacterModelHandle | null;
+      scenePos: THREE.Vector3;
+      target: THREE.Vector3;
+      yaw: number;
+      yawTarget: number;
+    }
+    const entityModels = new Map<number, EntityModel>(); // real body models (players + humanoid NPCs)
+
+    // npc-id → [raceName, "M"|"F"] for HUMANOID (player-race) town NPCs, derived
+    // from the server data. Monsters aren't in here → they stay capsules.
+    let npcAppearance: Record<string, [string, "M" | "F"]> = {};
+
+    // Decide whether an entity should get a real body model, and which race/gender.
+    const wantsModel = (e: WorldEntity): { race: string; gender: "F" | "M" } | null => {
+      if (e.isPlayer) return { race: RACE_BY_ORDINAL[e.race ?? 0] ?? "Human", gender: e.female ? "F" : "M" };
+      const a = npcAppearance[String(e.displayId)];
+      return a ? { race: a[0], gender: a[1] } : null;
+    };
+
+    const placeModel = (objectId: number, x: number, y: number, z: number, race: string, gender: "F" | "M") => {
+      const p = toScene(x, y, z); // feet at ground (model seats feet at y=0)
+      let em = entityModels.get(objectId);
+      if (!em) {
+        em = { handle: null, scenePos: p.clone(), target: p.clone(), yaw: 0, yawTarget: 0 };
+        entityModels.set(objectId, em);
+        loadCharacterModel(race, gender, { targetHeight: 3.4 })
+          .then((handle) => {
+            const still = entityModels.get(objectId);
+            if (!handle || !still) { handle?.dispose(); return; }
+            still.handle = handle;
+            handle.group.position.copy(still.scenePos);
+            handle.group.userData.objectId = objectId; // selectable
+            scene.add(handle.group);
+          })
+          .catch(() => {/* ignore */});
+      } else {
+        const dx = p.x - em.target.x, dz = p.z - em.target.z;
+        if (Math.hypot(dx, dz) > 0.05) em.yawTarget = Math.atan2(dx, dz) + Math.PI;
+        em.target.copy(p);
+      }
+    };
 
     const upsert = (e: WorldEntity) => {
+      const want = wantsModel(e);
+      if (want) { placeModel(e.objectId, e.x, e.y, e.z, want.race, want.gender); return; }
       let m = entityMeshes.get(e.objectId);
       if (!m) {
         m = new THREE.Mesh(npcGeom, npcMat);
@@ -182,17 +217,50 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
       p.y += 1.7;
       m.position.copy(p);
     };
+    const moveEntity = (objectId: number, x: number, y: number, z: number) => {
+      const em = entityModels.get(objectId);
+      if (em) {
+        const p = toScene(x, y, z);
+        const dx = p.x - em.target.x, dz = p.z - em.target.z;
+        if (Math.hypot(dx, dz) > 0.05) em.yawTarget = Math.atan2(dx, dz) + Math.PI;
+        em.target.copy(p);
+        return;
+      }
+      const m = entityMeshes.get(objectId);
+      if (m) { const p = toScene(x, y, z); p.y += 1.7; m.position.copy(p); }
+    };
     const remove = (objectId: number) => {
       const m = entityMeshes.get(objectId);
-      if (m) {
-        scene.remove(m);
-        entityMeshes.delete(objectId);
+      if (m) { scene.remove(m); entityMeshes.delete(objectId); }
+      const em = entityModels.get(objectId);
+      if (em) {
+        if (em.handle) { scene.remove(em.handle.group); em.handle.dispose(); }
+        entityModels.delete(objectId);
       }
     };
+    const entityCount = () => entityMeshes.size + entityModels.size;
 
     // Render whatever already spawned during the enter-world burst.
     conn?.getEntities().forEach(upsert);
-    setEntityCount(entityMeshes.size);
+    setEntityCount(entityCount());
+
+    // Load the humanoid-NPC appearance table, then upgrade any town NPCs that
+    // are currently capsules into their real race/gender body models.
+    fetch("/models/npc-appearance.json")
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((table: Record<string, [string, "M" | "F"]>) => {
+        npcAppearance = table || {};
+        for (const e of conn?.getEntities() ?? []) {
+          const want = wantsModel(e);
+          if (want && entityMeshes.has(e.objectId)) {
+            const m = entityMeshes.get(e.objectId)!;
+            scene.remove(m); entityMeshes.delete(e.objectId); // drop the capsule
+            placeModel(e.objectId, e.x, e.y, e.z, want.race, want.gender);
+          }
+        }
+        setEntityCount(entityCount());
+      })
+      .catch(() => {/* keep capsules */});
 
     const setPlayerTarget = (wx: number, wy: number, wz: number) => {
       const p = toScene(wx, wy, wz);
@@ -208,17 +276,12 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
         if (typeof pl.x === "number") setPlayerTarget(pl.x, pl.y ?? 0, pl.z ?? 0);
       } else if (ev.type === "npc-spawn") {
         upsert(ev.entity);
-        setEntityCount(entityMeshes.size);
+        setEntityCount(entityCount());
       } else if (ev.type === "npc-move") {
-        const m = entityMeshes.get(ev.objectId);
-        if (m) {
-          const p = toScene(ev.x, ev.y, ev.z);
-          p.y += 1.7;
-          m.position.copy(p);
-        }
+        moveEntity(ev.objectId, ev.x, ev.y, ev.z);
       } else if (ev.type === "npc-remove") {
         remove(ev.objectId);
-        setEntityCount(entityMeshes.size);
+        setEntityCount(entityCount());
       }
     });
 
@@ -273,9 +336,14 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
         ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera(ndc, camera);
-        const npcHits = raycaster.intersectObjects(Array.from(entityMeshes.values()), false);
+        const targets: THREE.Object3D[] = Array.from(entityMeshes.values());
+        for (const em of entityModels.values()) if (em.handle) targets.push(em.handle.group);
+        const npcHits = raycaster.intersectObjects(targets, true);
         if (npcHits.length > 0) {
-          const id = npcHits[0].object.userData.objectId as number | undefined;
+          // walk up to the object that carries an objectId (model groups tag the root)
+          let o: THREE.Object3D | null = npcHits[0].object;
+          while (o && o.userData?.objectId === undefined) o = o.parent;
+          const id = o?.userData?.objectId as number | undefined;
           if (typeof id === "number") {
             setSelectedTarget(id);
             onTargetTap?.(id);
@@ -336,6 +404,19 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
       if (playerModel) {
         playerModel.group.position.copy(playerScenePos);
         playerModel.group.rotation.y = playerYaw;
+      }
+
+      // chase every other-player model toward its server target + face travel
+      for (const em of entityModels.values()) {
+        em.scenePos.lerp(em.target, 0.12);
+        let edy = em.yawTarget - em.yaw;
+        while (edy > Math.PI) edy -= Math.PI * 2;
+        while (edy < -Math.PI) edy += Math.PI * 2;
+        em.yaw += edy * 0.18;
+        if (em.handle) {
+          em.handle.group.position.copy(em.scenePos);
+          em.handle.group.rotation.y = em.yaw;
+        }
       }
       updateCamera();
 
@@ -491,13 +572,10 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
           if (!loadingTiles.has(key)) { /* unloaded mid-flight */ } else {
             mapsRoot.add(g);
             loadedTiles.set(key, g);
-            const wasFirst = !firstTileLoaded;
             firstTileLoaded = true;
             setMapInfo({ path: `Maps/${key}.unr`, actors: g.userData.meshCount ?? 0, spawns: loadedTiles.size });
-            setLoadStatus(`tiles: ${[...loadedTiles.keys()].join(", ")}`, 100);
-            if (wasFirst) onReadyRef.current?.();
+            setLoadStatus(`tiles: ${[...loadedTiles.keys()].join(", ")}`);
           }
-
         } catch (err) {
           console.warn("[tile] failed", key, err);
         }
@@ -530,9 +608,7 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
       tileTimer = window.setInterval(updateTiles, 1200); // re-check as the player moves
     })().catch((err) => {
       console.error("[map] loader failed", err);
-      setLoadStatus(`Map load failed: ${(err as Error).message}`, 100);
-      onReadyRef.current?.();
-
+      setLoadStatus(`Map load failed: ${(err as Error).message}`);
     });
 
     return () => {
@@ -546,6 +622,8 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
       renderer.domElement.removeEventListener("wheel", onWheel);
       entityMeshes.forEach((m) => scene.remove(m));
       entityMeshes.clear();
+      entityModels.forEach((em) => { if (em.handle) { scene.remove(em.handle.group); em.handle.dispose(); } });
+      entityModels.clear();
       playerModelDisposed = true;
       if (playerModel) { scene.remove(playerModel.group); playerModel.dispose(); }
       if (mapGroup) scene.remove(mapGroup);
