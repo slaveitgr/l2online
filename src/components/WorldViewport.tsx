@@ -766,12 +766,19 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     return () => {
       cancelAnimationFrame(raf);
       if (tileTimer) clearInterval(tileTimer);
+      clearInterval(pumpTimer);
       unsub?.();
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("keydown", onKey);
       renderer.domElement.removeEventListener("pointerdown", onDown);
       renderer.domElement.removeEventListener("pointermove", onMove);
       renderer.domElement.removeEventListener("pointerup", onUp);
+      renderer.domElement.removeEventListener("pointerleave", onPointerLeave);
       renderer.domElement.removeEventListener("wheel", onWheel);
+      setHoveredTarget(null);
+      setDialogTarget(null);
+      hoverRing.geometry.dispose(); (hoverRing.material as THREE.Material).dispose();
+      selectRing.geometry.dispose(); (selectRing.material as THREE.Material).dispose();
       entityMeshes.forEach((m) => scene.remove(m));
       entityMeshes.clear();
       entityModels.forEach((em) => { if (em.handle) { scene.remove(em.handle.group); em.handle.dispose(); } });
