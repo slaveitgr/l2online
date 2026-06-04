@@ -51,7 +51,17 @@ function toThreeTexture(t: L2Texture): THREE.Texture | null {
   }
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
-  tex.minFilter = THREE.LinearFilter;
+  // L2 diffuse maps are authored in sRGB — without this they render washed-out/grey.
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  if (!dxt) {
+    // uncompressed: trilinear mipmaps kill the distance shimmer
+    tex.generateMipmaps = true;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+  } else {
+    // DXT here carries only the top mip → bilinear
+    tex.minFilter = THREE.LinearFilter;
+  }
   tex.magFilter = THREE.LinearFilter;
   tex.flipY = false;
   tex.needsUpdate = true;
