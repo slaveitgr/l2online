@@ -95,7 +95,7 @@ export function WorldPreloader({ percent, message, charName }: WorldPreloaderPro
               color: "#f3e2a8",
               textShadow: "0 1px 2px rgba(0,0,0,0.9)",
               letterSpacing: 2,
-              tabularNums: "true",
+              fontVariantNumeric: "tabular-nums",
             }}
           >
             {pct.toFixed(0)}%
