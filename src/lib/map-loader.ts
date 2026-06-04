@@ -118,7 +118,8 @@ function buildTerrainMesh(terrain: IndexedTerrainInfo, heightmap: L2Texture): TH
   const indexArray = width * height > 65535 ? new Uint32Array(indices) : new Uint16Array(indices);
   geometry.setIndex(new THREE.BufferAttribute(indexArray, 1));
   geometry.computeVertexNormals();
-  const material = new THREE.MeshStandardMaterial({ color: 0x5c6b3a, roughness: 1, metalness: 0 });
+  // neutral earth tone (true ground texturing needs the terrain layer splatmaps — TODO)
+  const material = new THREE.MeshStandardMaterial({ color: 0x6f6453, roughness: 1, metalness: 0 });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = `Terrain:${terrain.mapX}_${terrain.mapY}`;
   mesh.receiveShadow = true;
@@ -228,7 +229,8 @@ export async function loadMap(
   }
 
   const l2Group = new THREE.Group();
-  const fallbackMat = new THREE.MeshStandardMaterial({ color: 0x8d8270, roughness: 0.92 });
+  // Untextured meshes fall back to a muted stone tone (not bright tan that glares white).
+  const fallbackMat = new THREE.MeshStandardMaterial({ color: 0x5d564a, roughness: 0.95 });
 
   let terrainMeshes = 0;
   for (const terrain of terrains) {
@@ -271,7 +273,18 @@ export async function loadMap(
         const ref = usx.meshMaterialRef(meshName);
         if (ref != null) {
           const tex = await resolveTexture(usx, ref);
-          if (tex) material = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, metalness: 0 });
+          if (tex) {
+            // alphaTest cuts out foliage/banner/cloth cards (their texture's transparent
+            // areas otherwise render as opaque white "shards"). Opaque walls keep alpha=255
+            // so nothing is discarded. side=Double so thin leaf/cloth cards show both faces.
+            material = new THREE.MeshStandardMaterial({
+              map: tex,
+              roughness: 0.95,
+              metalness: 0,
+              alphaTest: 0.4,
+              side: THREE.DoubleSide,
+            });
+          }
         }
       }
 
@@ -302,5 +315,8 @@ export async function loadMap(
   l2Group.rotation.x = -Math.PI / 2;
   root.scale.setScalar(1 / scale);
   root.name = "L2Map";
+  // expose how much real ground we produced so the viewport can drop its placeholder
+  root.userData.terrainMeshes = terrainMeshes;
+  root.userData.meshCount = byPkg.size;
   return root;
 }

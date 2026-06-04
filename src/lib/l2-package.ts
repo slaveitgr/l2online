@@ -495,6 +495,7 @@ export class L2Package {
     let fmtId = -1,
       uSize = 0,
       vSize = 0,
+      paletteRef = 0,
       guard = 0;
     for (;;) {
       if (guard++ > 400) break;
@@ -519,6 +520,7 @@ export class L2Package {
       if (nm === "Format") fmtId = b[cur.o];
       else if (nm === "USize") uSize = dv.getInt32(cur.o, true);
       else if (nm === "VSize") vSize = dv.getInt32(cur.o, true);
+      else if (nm === "Palette" && ptype === 0x05) paletteRef = readCompat32(b, cur.o)[0];
       cur.o += dsz;
     }
 
@@ -539,6 +541,7 @@ export class L2Package {
     }
     if (dataOff < 0) return null;
     let data = b.slice(dataOff, dataOff + topLen);
+    let outFormat: L2TextureFormat = format;
     // RGBA8 is stored BGRA on disk → swizzle to RGBA so it's a ready-to-use
     // uncompressed image (for a three.js DataTexture or a canvas/ImageData).
     if (format === "RGBA8") {
@@ -550,8 +553,60 @@ export class L2Package {
         rgba[i + 3] = data[i + 3];
       }
       data = rgba;
+    } else if (format === "P8") {
+      // palettized: decode indices through the referenced Palette → RGBA8
+      const pal = paletteRef > 0 ? this.readPalette(this.exports[paletteRef - 1]) : null;
+      if (!pal) return null;
+      const rgba = new Uint8Array(uSize * vSize * 4);
+      for (let i = 0; i < uSize * vSize; i++) {
+        const idx = data[i] * 4;
+        rgba[i * 4] = pal[idx];
+        rgba[i * 4 + 1] = pal[idx + 1];
+        rgba[i * 4 + 2] = pal[idx + 2];
+        rgba[i * 4 + 3] = pal[idx + 3];
+      }
+      data = rgba;
+      outFormat = "RGBA8";
     }
-    return { name: e.objectName, width: uSize, height: vSize, format, data };
+    // NB: G16 is intentionally left RAW — it is the terrain heightmap (buildTerrainMesh
+    // reads the 16-bit heights), never a diffuse map, so it must not be expanded to RGBA.
+    return { name: e.objectName, width: uSize, height: vSize, format: outFormat, data };
+  }
+
+  /** Decode a UPalette export → RGBA byte table (FColor is BGRA on disk). */
+  private readPalette(e: UExport | undefined): Uint8Array | null {
+    if (!e || e.size <= 0) return null;
+    const b = this.bytes;
+    const dv = this.dv;
+    const cur = { o: e.offset };
+    const ci = () => { const [v, s] = readCompat32(b, cur.o); cur.o += s; return v; };
+    if (e.flags & RF_HAS_STACK) { const nid = ci(); ci(); cur.o += 12; if (nid !== 0) ci(); }
+    let guard = 0;
+    for (;;) {
+      if (guard++ > 400) break;
+      const nm = this.nm(ci());
+      if (nm === "None") break;
+      const info = b[cur.o++];
+      const ptype = info & 0x0f, szc = info & 0x70, isArray = info & 0x80;
+      if (ptype === PT_STRUCT) ci();
+      let dsz: number;
+      if (szc in STATIC_SIZES) dsz = STATIC_SIZES[szc];
+      else if (szc === 0x50) dsz = b[cur.o++];
+      else if (szc === 0x60) { dsz = dv.getUint16(cur.o, true); cur.o += 2; }
+      else if (szc === 0x70) { dsz = dv.getUint32(cur.o, true); cur.o += 4; }
+      else dsz = 0;
+      if (isArray && ptype !== PT_BOOL) cur.o++;
+      if (ptype === PT_BOOL) continue;
+      cur.o += dsz;
+    }
+    const count = ci();
+    if (count < 1 || count > 4096) return null;
+    const pal = new Uint8Array(count * 4);
+    for (let i = 0; i < count; i++) {
+      const bch = b[cur.o++], g = b[cur.o++], r = b[cur.o++], a = b[cur.o++];
+      pal[i * 4] = r; pal[i * 4 + 1] = g; pal[i * 4 + 2] = bch; pal[i * 4 + 3] = a;
+    }
+    return pal;
   }
 
   /**
