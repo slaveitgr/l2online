@@ -70,7 +70,7 @@ function toThreeTexture(t: L2Texture): THREE.Texture | null {
   return tex;
 }
 
-function buildTerrainMesh(terrain: IndexedTerrainInfo, heightmap: L2Texture): THREE.Mesh | null {
+function buildTerrainGeometry(terrain: IndexedTerrainInfo, heightmap: L2Texture): { geometry: THREE.BufferGeometry; width: number; height: number } | null {
   if (heightmap.format !== "G16" || heightmap.width < 2 || heightmap.height < 2) return null;
   if (heightmap.data.byteLength < heightmap.width * heightmap.height * 2) return null;
 
@@ -120,12 +120,7 @@ function buildTerrainMesh(terrain: IndexedTerrainInfo, heightmap: L2Texture): TH
   const indexArray = width * height > 65535 ? new Uint32Array(indices) : new Uint16Array(indices);
   geometry.setIndex(new THREE.BufferAttribute(indexArray, 1));
   geometry.computeVertexNormals();
-  // neutral earth tone (true ground texturing needs the terrain layer splatmaps — TODO)
-  const material = new THREE.MeshStandardMaterial({ color: 0x6f6453, roughness: 1, metalness: 0 });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = `Terrain:${terrain.mapX}_${terrain.mapY}`;
-  mesh.receiveShadow = true;
-  return mesh;
+  return { geometry, width, height };
 }
 
 export async function loadMap(
@@ -234,18 +229,73 @@ export async function loadMap(
   // Untextured meshes fall back to a muted stone tone (not bright tan that glares white).
   const fallbackMat = new THREE.MeshStandardMaterial({ color: 0x5d564a, roughness: 0.95 });
 
+  // resolve an object-index UnrealObjectRef → a decoded three texture (cached)
+  const terrainTexCache = new Map<string, THREE.Texture | null>();
+  const resolveRefTexture = async (
+    ref: { target: { kind: string; name: string; pkg: string } } | null,
+  ): Promise<THREE.Texture | null> => {
+    if (!ref?.target?.name) return null;
+    const t = ref.target;
+    const key = `${t.pkg}:${t.name}`;
+    if (terrainTexCache.has(key)) return terrainTexCache.get(key)!;
+    const tp = t.kind === "export" ? map : await getPkg(t.pkg);
+    const e = tp?.findExport(t.name);
+    const l2 = e ? tp!.readTexture(e) : null;
+    const tex = l2 ? toThreeTexture(l2) : null;
+    terrainTexCache.set(key, tex);
+    return tex;
+  };
+
   let terrainMeshes = 0;
+  let terrainLayered = 0;
   for (const terrain of terrains) {
     if (!terrain.terrainMap) continue;
-    const target = terrain.terrainMap.target;
-    const terrainPkg = await getPkg(target.pkg);
-    const terrainTexture = terrainPkg?.readTexture(target.name);
-    const terrainMesh = terrainTexture ? buildTerrainMesh(terrain, terrainTexture) : null;
-    if (!terrainMesh) continue;
+    const hmPkg = await getPkg(terrain.terrainMap.target.pkg);
+    const heightmap = hmPkg?.readTexture(terrain.terrainMap.target.name);
+    const built = heightmap ? buildTerrainGeometry(terrain, heightmap) : null;
+    if (!built) continue;
+    const { geometry, width } = built;
+
+    // One mesh per terrain layer: layer 0 = opaque base, the rest blended by their alpha mask.
+    const tile = Math.max(2, Math.round((width - 1) / 8)); // ground-texture tiling across the tile
+    const layers = terrain.terrainLayers ?? [];
+    let layerMeshes = 0;
+    for (let li = 0; li < layers.length; li++) {
+      const ground = await resolveRefTexture(layers[li].texture);
+      if (!ground) continue;
+      const isBase = layerMeshes === 0;
+      // overlays MUST have a valid alpha mask, otherwise they would paint opaque over
+      // the whole tile (z-fighting). Only the first usable layer is the opaque base.
+      const alpha = isBase ? null : await resolveRefTexture(layers[li].alphaMap);
+      if (!isBase && !alpha) continue;
+      ground.wrapS = ground.wrapT = THREE.RepeatWrapping;
+      ground.repeat.set(tile, tile);
+      if (alpha) { alpha.colorSpace = THREE.NoColorSpace; alpha.wrapS = alpha.wrapT = THREE.ClampToEdgeWrapping; alpha.repeat.set(1, 1); }
+      const mat = new THREE.MeshStandardMaterial(
+        isBase
+          ? { map: ground, roughness: 1, metalness: 0 }
+          : {
+              map: ground, roughness: 1, metalness: 0, alphaMap: alpha!, transparent: true,
+              depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 - li, polygonOffsetUnits: -1,
+            },
+      );
+      const m = new THREE.Mesh(geometry, mat);
+      m.name = `Terrain:${terrain.mapX}_${terrain.mapY}:L${li}`;
+      m.renderOrder = li;
+      m.receiveShadow = true;
+      l2Group.add(m);
+      layerMeshes++;
+    }
+    if (layerMeshes > 1) terrainLayered++;
+    if (layerMeshes === 0) {
+      // no usable layer textures → neutral solid so there is still a floor
+      const m = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0x6f6453, roughness: 1, metalness: 0 }));
+      m.receiveShadow = true;
+      l2Group.add(m);
+    }
     terrainMeshes++;
-    l2Group.add(terrainMesh);
   }
-  if (terrains.length) log(`[terrain] ${terrainMeshes}/${terrains.length} heightmaps meshed`);
+  if (terrains.length) log(`[terrain] ${terrainMeshes}/${terrains.length} meshed · ${terrainLayered} layer-textured`);
 
   const byPkg = new Map<string, MapPlacement[]>();
   for (const p of placements) (byPkg.get(p.pkg) ?? byPkg.set(p.pkg, []).get(p.pkg)!).push(p);

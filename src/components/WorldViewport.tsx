@@ -445,9 +445,9 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
           },
         );
         scene.add(mapGroup);
-        // If the map produced its own ground (terrain heightmap), drop the flat
-        // placeholder so the real textured floor shows. Keep it (invisible) for raycasts.
-        if (((mapGroup.userData.terrainMeshes as number) ?? 0) > 0) terrain.visible = false;
+        // NOTE: keep the flat placeholder ground VISIBLE as a backstop. Hiding it where
+        // the map's terrain doesn't fully cover the plaza let the sky background show
+        // through as large light-blue voids. Real textured floor = terrain-layer task.
         setLoadStatus(`${pickedPath} · meshes assembled`);
       } catch (err) {
         console.error("[map] assemble failed, falling back to markers", err);
