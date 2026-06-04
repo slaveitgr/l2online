@@ -400,14 +400,45 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       downT = performance.now();
       renderer.domElement.setPointerCapture(e.pointerId);
     };
-    const onMove = (e: PointerEvent) => {
-      if (!dragging) return;
-      theta -= (e.clientX - lastX) * 0.005;
-      phi = Math.max(0.15, Math.min(Math.PI / 2.1, phi - (e.clientY - lastY) * 0.005));
-      lastX = e.clientX;
-      lastY = e.clientY;
-      updateCamera();
+    // Collect all selectable NPC objects (capsule + upgraded model groups).
+    const npcSelectables = (): THREE.Object3D[] => {
+      const a: THREE.Object3D[] = Array.from(entityMeshes.values());
+      for (const em of entityModels.values()) if (em.handle) a.push(em.handle.group);
+      return a;
     };
+    const pickNpcAt = (clientX: number, clientY: number): number | null => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(ndc, camera);
+      const hits = raycaster.intersectObjects(npcSelectables(), true);
+      if (!hits.length) return null;
+      let o: THREE.Object3D | null = hits[0].object;
+      while (o && o.userData?.objectId === undefined) o = o.parent;
+      const id = o?.userData?.objectId;
+      return typeof id === "number" ? id : null;
+    };
+
+    const onMove = (e: PointerEvent) => {
+      if (dragging) {
+        theta -= (e.clientX - lastX) * 0.005;
+        phi = Math.max(0.15, Math.min(Math.PI / 2.1, phi - (e.clientY - lastY) * 0.005));
+        lastX = e.clientX;
+        lastY = e.clientY;
+        updateCamera();
+        return;
+      }
+      // Cheap-ish hover raycast (rate-limited via rAF flag).
+      if (hoverPending) return;
+      hoverPending = true;
+      pendingHoverX = e.clientX; pendingHoverY = e.clientY;
+    };
+    let hoverPending = false;
+    let pendingHoverX = 0, pendingHoverY = 0;
+    const onPointerLeave = () => {
+      if (lastHoverId !== null) { lastHoverId = null; setHoveredTarget(null); }
+    };
+    renderer.domElement.style.cursor = "default";
     const onUp = (e: PointerEvent) => {
       dragging = false;
       renderer.domElement.releasePointerCapture(e.pointerId);
