@@ -37,7 +37,13 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
   const [fps, setFps] = useState(0);
   const [worldPos, setWorldPos] = useState<{ x: number; y: number; z: number } | null>(null);
   const [entityCount, setEntityCount] = useState(0);
-  const [loadStatus, setLoadStatus] = useState("Initializing…");
+  const [loadStatus, setLoadStatusRaw] = useState("Initializing…");
+  const setLoadStatus = (msg: string, pct?: number) => {
+    setLoadStatusRaw(msg);
+    if (pct != null) onLoadProgressRef.current?.(pct, msg);
+    else onLoadProgressRef.current?.(-1 as number, msg);
+  };
+
   const [assetSummary, setAssetSummary] = useState<{
     rootName: string;
     maps: CachedFileMeta[];
