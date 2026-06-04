@@ -22,7 +22,9 @@ import {
   useSelectedTarget,
   getSelectedTarget,
   setSelectedTarget,
+  setDialogTarget,
 } from "@/lib/game-state";
+import { NpcDialog, NpcInteractPrompt } from "@/components/hud/NpcDialog";
 
 export const Route = createFileRoute("/world")({
   head: () => ({
@@ -264,7 +266,10 @@ function WorldPage() {
               }}
               onInteract={() => {
                 const id = getSelectedTarget();
-                if (id != null) getGameConnection()?.sendAction(id);
+                if (id != null) {
+                  getGameConnection()?.sendAction(id);
+                  setDialogTarget(id);
+                }
               }}
               onMove={handleJoystick}
               onSay={(text) => getGameConnection()?.sendSay(text)}
@@ -282,6 +287,10 @@ function WorldPage() {
 
         )}
       </SpriteProvider>
+
+      {/* NPC interaction layer (hover prompt + talk dialog). */}
+      <NpcInteractPrompt />
+      <NpcDialog onSay={(line) => setChat((c) => [...c, { color: "#9c906f", text: line }])} />
 
       <div className="absolute top-1.5 left-1/2 -translate-x-1/2 text-[8px] font-mono text-muted-foreground tracking-widest pointer-events-none z-50">
         L2SLAVE · {char?.name ?? "—"} · pkts {packetCount}

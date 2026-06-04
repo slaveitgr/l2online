@@ -4,9 +4,15 @@ import { listFiles, getManifest, getCacheStats, getFile, formatBytes, type Cache
 import { listMountFiles, readFromMount } from "@/lib/local-mount";
 import { loadMap } from "@/lib/map-loader";
 import { getGameConnection, type GameEvent, type WorldEntity } from "@/lib/l2-protocol/game-client";
-import { setSelectedTarget } from "@/lib/game-state";
+import {
+  setSelectedTarget,
+  setHoveredTarget,
+  getSelectedTarget,
+  setDialogTarget,
+  getDialogTarget,
+} from "@/lib/game-state";
 import { loadCharacterModel, type CharacterModelHandle } from "@/lib/character-mesh";
-import { loadNpcMesh, npcMeshInfo } from "@/lib/npc-mesh";
+import { loadNpcMesh, npcMeshInfo, npcMeshInfoSync, isNpcPkgLoaded } from "@/lib/npc-mesh";
 
 /**
  * Phase 1.5 viewport.
@@ -216,15 +222,28 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     };
 
     // Async: pick the best model for an NPC — exact npcgrp mesh first, then a
-    // race/sex body, else leave the capsule.
+    // race/sex body, else leave the capsule. Called only for nearby NPCs by the
+    // streaming gate below (see `pumpUpgrades`).
+    const inflightUpgrades = new Set<number>();
+    const upgradedOrSkipped = new Set<number>(); // already loaded OR no model available
     const upgradeNpc = async (e: WorldEntity) => {
-      const info = await npcMeshInfo(e.displayId);
-      if (info?.m) {
-        placeModel(e.objectId, e.x, e.y, e.z, () => loadNpcMesh(info.m, { targetHeight: 3.4, texName: info.t?.[0] }), () => dropCapsule(e.objectId));
-        if (entityModels.has(e.objectId)) return;
+      if (inflightUpgrades.has(e.objectId) || upgradedOrSkipped.has(e.objectId)) return;
+      inflightUpgrades.add(e.objectId);
+      try {
+        const info = await npcMeshInfo(e.displayId);
+        if (info?.m) {
+          placeModel(e.objectId, e.x, e.y, e.z, () => loadNpcMesh(info.m, { targetHeight: 3.4, texName: info.t?.[0] }), () => dropCapsule(e.objectId));
+          upgradedOrSkipped.add(e.objectId);
+          return;
+        }
+        const a = npcAppearance[String(e.displayId)];
+        if (a) {
+          placeModel(e.objectId, e.x, e.y, e.z, () => loadCharacterModel(a[0], a[1] as "F" | "M", { targetHeight: 3.4 }), () => dropCapsule(e.objectId));
+        }
+        upgradedOrSkipped.add(e.objectId);
+      } finally {
+        inflightUpgrades.delete(e.objectId);
       }
-      const a = npcAppearance[String(e.displayId)];
-      if (a) placeModel(e.objectId, e.x, e.y, e.z, () => loadCharacterModel(a[0], a[1] as "F" | "M", { targetHeight: 3.4 }), () => dropCapsule(e.objectId));
     };
 
     const upsert = (e: WorldEntity) => {
@@ -234,8 +253,9 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         placeModel(e.objectId, e.x, e.y, e.z, () => loadCharacterModel(race, gender, { targetHeight: 3.4 }));
         return;
       }
-      ensureCapsule(e);        // show something immediately
-      void upgradeNpc(e);      // then swap in the exact mesh / body when ready
+      ensureCapsule(e);   // always show a marker immediately
+      // mesh upgrade is deferred — `pumpUpgrades` decides when it's worth fetching
+      // the multi-MB package for this NPC's distance from the player.
     };
     const moveEntity = (objectId: number, x: number, y: number, z: number) => {
       const em = entityModels.get(objectId);
@@ -264,18 +284,67 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     conn?.getEntities().forEach(upsert);
     setEntityCount(entityCount());
 
-    // Load the humanoid-NPC race/sex fallback table, then retry the upgrade for
-    // any NPC still shown as a capsule (e.g. no exact mesh available).
+    // Load the humanoid-NPC race/sex fallback table. The streaming pump (below)
+    // will pick up any NPC eligible for upgrade once this table is available.
     fetch("/models/npc-appearance.json")
       .then((r) => (r.ok ? r.json() : {}))
-      .then((table: Record<string, [string, "M" | "F"]>) => {
-        npcAppearance = table || {};
-        for (const e of conn?.getEntities() ?? []) {
-          if (!e.isPlayer && entityMeshes.has(e.objectId) && !entityModels.has(e.objectId)) void upgradeNpc(e);
-        }
-        setEntityCount(entityCount());
-      })
+      .then((table: Record<string, [string, "M" | "F"]>) => { npcAppearance = table || {}; })
       .catch(() => {/* keep capsules */});
+
+    // ── Selection / hover highlight rings ────────────────────────────────
+    const makeRing = (color: number, inner: number, outer: number, opacity: number) => {
+      const m = new THREE.Mesh(
+        new THREE.RingGeometry(inner, outer, 48),
+        new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity, depthWrite: false }),
+      );
+      m.rotation.x = -Math.PI / 2;
+      m.position.y = 0.12;
+      m.visible = false;
+      m.renderOrder = 2;
+      scene.add(m);
+      return m;
+    };
+    const hoverRing = makeRing(0xf6e7a6, 1.4, 1.9, 0.55);
+    const selectRing = makeRing(0xe24a3a, 1.7, 2.2, 0.85);
+    // Track hover id in a local mirror so we can clear it cheaply.
+    let lastHoverId: number | null = null;
+
+    // ── NPC mesh streaming pump ──────────────────────────────────────────
+    // Only upgrade NPCs near the player. Re-evaluated every ~600ms. This caps the
+    // worst case (hundreds of spawns) at a handful of package fetches and lets the
+    // network/CPU stay responsive while the map tiles stream in.
+    const UPGRADE_RADIUS_SCENE = 90; // ~2700 L2 units around the player
+    const pumpUpgrades = () => {
+      if (!conn) return;
+      // 1) NPCs already in a loaded package upgrade for free → always allowed.
+      // 2) Others must be within radius AND we cap "new package" work per tick.
+      let newPkgBudget = 1;
+      const ents = conn.getEntities();
+      // Pre-sort by distance so the closest NPCs get prioritised.
+      const candidates: Array<{ e: WorldEntity; d2: number }> = [];
+      for (const e of ents) {
+        if (e.isPlayer) continue;
+        if (entityModels.has(e.objectId) || inflightUpgrades.has(e.objectId) || upgradedOrSkipped.has(e.objectId)) continue;
+        const p = toScene(e.x, e.y, e.z);
+        const dx = p.x - playerScenePos.x, dz = p.z - playerScenePos.z;
+        candidates.push({ e, d2: dx * dx + dz * dz });
+      }
+      candidates.sort((a, b) => a.d2 - b.d2);
+      const radius2 = UPGRADE_RADIUS_SCENE * UPGRADE_RADIUS_SCENE;
+      for (const { e, d2 } of candidates) {
+        const info = npcMeshInfoSync(e.displayId);
+        const meshName = info?.m;
+        const cached = meshName ? isNpcPkgLoaded(meshName) : false;
+        if (cached) { void upgradeNpc(e); continue; }
+        if (d2 > radius2) continue;
+        if (newPkgBudget <= 0) continue;
+        newPkgBudget--;
+        void upgradeNpc(e);
+      }
+    };
+    const pumpTimer = window.setInterval(pumpUpgrades, 600);
+    // run once after a tiny delay so the first burst of spawns is handled
+    window.setTimeout(pumpUpgrades, 250);
 
     const setPlayerTarget = (wx: number, wy: number, wz: number) => {
       const p = toScene(wx, wy, wz);
@@ -331,14 +400,45 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       downT = performance.now();
       renderer.domElement.setPointerCapture(e.pointerId);
     };
-    const onMove = (e: PointerEvent) => {
-      if (!dragging) return;
-      theta -= (e.clientX - lastX) * 0.005;
-      phi = Math.max(0.15, Math.min(Math.PI / 2.1, phi - (e.clientY - lastY) * 0.005));
-      lastX = e.clientX;
-      lastY = e.clientY;
-      updateCamera();
+    // Collect all selectable NPC objects (capsule + upgraded model groups).
+    const npcSelectables = (): THREE.Object3D[] => {
+      const a: THREE.Object3D[] = Array.from(entityMeshes.values());
+      for (const em of entityModels.values()) if (em.handle) a.push(em.handle.group);
+      return a;
     };
+    const pickNpcAt = (clientX: number, clientY: number): number | null => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(ndc, camera);
+      const hits = raycaster.intersectObjects(npcSelectables(), true);
+      if (!hits.length) return null;
+      let o: THREE.Object3D | null = hits[0].object;
+      while (o && o.userData?.objectId === undefined) o = o.parent;
+      const id = o?.userData?.objectId;
+      return typeof id === "number" ? id : null;
+    };
+
+    const onMove = (e: PointerEvent) => {
+      if (dragging) {
+        theta -= (e.clientX - lastX) * 0.005;
+        phi = Math.max(0.15, Math.min(Math.PI / 2.1, phi - (e.clientY - lastY) * 0.005));
+        lastX = e.clientX;
+        lastY = e.clientY;
+        updateCamera();
+        return;
+      }
+      // Cheap-ish hover raycast (rate-limited via rAF flag).
+      if (hoverPending) return;
+      hoverPending = true;
+      pendingHoverX = e.clientX; pendingHoverY = e.clientY;
+    };
+    let hoverPending = false;
+    let pendingHoverX = 0, pendingHoverY = 0;
+    const onPointerLeave = () => {
+      if (lastHoverId !== null) { lastHoverId = null; setHoveredTarget(null); }
+    };
+    renderer.domElement.style.cursor = "default";
     const onUp = (e: PointerEvent) => {
       dragging = false;
       renderer.domElement.releasePointerCapture(e.pointerId);
@@ -347,24 +447,16 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       const moved = Math.hypot(dx, dy);
       const dt = performance.now() - downT;
       if (moved < 6 && dt < 350) {
+        const id = pickNpcAt(e.clientX, e.clientY);
+        if (id !== null) {
+          setSelectedTarget(id);
+          onTargetTap?.(id);
+          return;
+        }
         const rect = renderer.domElement.getBoundingClientRect();
         ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera(ndc, camera);
-        const targets: THREE.Object3D[] = Array.from(entityMeshes.values());
-        for (const em of entityModels.values()) if (em.handle) targets.push(em.handle.group);
-        const npcHits = raycaster.intersectObjects(targets, true);
-        if (npcHits.length > 0) {
-          // walk up to the object that carries an objectId (model groups tag the root)
-          let o: THREE.Object3D | null = npcHits[0].object;
-          while (o && o.userData?.objectId === undefined) o = o.parent;
-          const id = o?.userData?.objectId as number | undefined;
-          if (typeof id === "number") {
-            setSelectedTarget(id);
-            onTargetTap?.(id);
-            return;
-          }
-        }
         const groundHits = raycaster.intersectObject(terrain, false);
         if (groundHits.length > 0) {
           const p = groundHits[0].point;
@@ -391,7 +483,27 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     renderer.domElement.addEventListener("pointerdown", onDown);
     renderer.domElement.addEventListener("pointermove", onMove);
     renderer.domElement.addEventListener("pointerup", onUp);
+    renderer.domElement.addEventListener("pointerleave", onPointerLeave);
     renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
+
+    // Keyboard: T (or Enter) opens the talk dialog for the selected NPC.
+    // Esc closes it (or clears the selection if no dialog is open).
+    const onKey = (e: KeyboardEvent) => {
+      // Ignore when typing in chat / inputs.
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      if (e.key === "t" || e.key === "T" || e.key === "Enter") {
+        const sel = getSelectedTarget();
+        if (sel !== null) {
+          setDialogTarget(sel);
+          e.preventDefault();
+        }
+      } else if (e.key === "Escape") {
+        if (getDialogTarget() !== null) setDialogTarget(null);
+        else setSelectedTarget(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
 
     const onResize = () => {
       camera.aspect = mount.clientWidth / mount.clientHeight;
@@ -434,6 +546,31 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         }
       }
       updateCamera();
+
+      // Hover raycast (deferred from pointermove for cheap throttling).
+      if (hoverPending) {
+        hoverPending = false;
+        const id = pickNpcAt(pendingHoverX, pendingHoverY);
+        if (id !== lastHoverId) {
+          lastHoverId = id;
+          setHoveredTarget(id);
+          renderer.domElement.style.cursor = id !== null ? "pointer" : "default";
+        }
+      }
+
+      // Position highlight rings under hovered + selected NPCs.
+      const positionRing = (ring: THREE.Mesh, id: number | null) => {
+        if (id === null) { ring.visible = false; return; }
+        const em = entityModels.get(id);
+        if (em) { ring.position.set(em.scenePos.x, em.scenePos.y + 0.12, em.scenePos.z); ring.visible = true; return; }
+        const cap = entityMeshes.get(id);
+        if (cap) { ring.position.set(cap.position.x, 0.12, cap.position.z); ring.visible = true; return; }
+        ring.visible = false;
+      };
+      positionRing(hoverRing, lastHoverId);
+      positionRing(selectRing, getSelectedTarget());
+      hoverRing.scale.setScalar(1 + Math.sin(t * 6) * 0.05);
+      selectRing.scale.setScalar(1 + Math.sin(t * 4) * 0.03);
 
       playerRing.scale.setScalar(1 + Math.sin(t * 3) * 0.04);
       renderer.render(scene, camera);
@@ -629,12 +766,19 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     return () => {
       cancelAnimationFrame(raf);
       if (tileTimer) clearInterval(tileTimer);
+      clearInterval(pumpTimer);
       unsub?.();
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("keydown", onKey);
       renderer.domElement.removeEventListener("pointerdown", onDown);
       renderer.domElement.removeEventListener("pointermove", onMove);
       renderer.domElement.removeEventListener("pointerup", onUp);
+      renderer.domElement.removeEventListener("pointerleave", onPointerLeave);
       renderer.domElement.removeEventListener("wheel", onWheel);
+      setHoveredTarget(null);
+      setDialogTarget(null);
+      hoverRing.geometry.dispose(); (hoverRing.material as THREE.Material).dispose();
+      selectRing.geometry.dispose(); (selectRing.material as THREE.Material).dispose();
       entityMeshes.forEach((m) => scene.remove(m));
       entityMeshes.clear();
       entityModels.forEach((em) => { if (em.handle) { scene.remove(em.handle.group); em.handle.dispose(); } });

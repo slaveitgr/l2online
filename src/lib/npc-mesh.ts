@@ -1,9 +1,11 @@
 /**
- * npc-mesh.ts — lazy loader for exact NPC skeletal meshes.
+ * npc-mesh.ts — lazy/streaming loader for exact NPC skeletal meshes.
  *
  * npc-mesh-map.json (built from the real npcgrp) maps npc-id → { m: "<Pkg>.<export>", t: [...] }.
- * Geometry lives in per-package bundles public/models/npc/pkg/<Pkg>.json, fetched on demand
- * and cached. Returns a THREE.Group (feet at y=0, normalised to targetHeight) like the player model.
+ * Geometry lives in per-package bundles public/models/npc/pkg/<Pkg>.json. Packages are 3–12 MB
+ * each so we (a) only fetch a package when an NPC from it is actually requested, (b) cap the
+ * number of in-flight fetches to avoid bandwidth/CPU spikes, and (c) ask the browser to fetch
+ * with low priority so map tiles and the player avatar win the network race.
  */
 import * as THREE from "three";
 
@@ -18,20 +20,55 @@ const _mapPromise = (async () => {
   return _map!;
 })();
 
+// ── Concurrency-limited package fetcher ───────────────────────────────────
+const MAX_INFLIGHT = 2;
+let inflight = 0;
+const queue: Array<() => void> = [];
+function acquire(): Promise<void> {
+  if (inflight < MAX_INFLIGHT) { inflight++; return Promise.resolve(); }
+  return new Promise((res) => queue.push(() => { inflight++; res(); }));
+}
+function release() {
+  inflight = Math.max(0, inflight - 1);
+  const next = queue.shift();
+  if (next) next();
+}
+
 const _pkgCache = new Map<string, Promise<Pkg | null>>();
 function loadPkg(pkg: string): Promise<Pkg | null> {
   let p = _pkgCache.get(pkg);
   if (!p) {
-    p = fetch(`/models/npc/pkg/${pkg}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    p = (async () => {
+      await acquire();
+      try {
+        // `priority: 'low'` keeps tiles/avatar fetches ahead of these multi-MB bundles.
+        const init = { priority: "low" } as RequestInit;
+        const r = await fetch(`/models/npc/pkg/${pkg}.json`, init);
+        if (!r.ok) return null;
+        return (await r.json()) as Pkg;
+      } catch { return null; } finally { release(); }
+    })();
     _pkgCache.set(pkg, p);
   }
   return p;
+}
+
+/** True when the package bundle is already resident in cache. */
+export function isNpcPkgLoaded(meshFullName: string): boolean {
+  const dot = meshFullName.indexOf(".");
+  if (dot < 0) return false;
+  return _pkgCache.has(meshFullName.slice(0, dot));
 }
 
 /** Returns { m, t } for an npc display id, or null if it isn't in the map. */
 export async function npcMeshInfo(displayId: number): Promise<{ m: string; t?: string[] } | null> {
   const map = _map ?? (await _mapPromise);
   return map[String(displayId)] ?? null;
+}
+
+/** Synchronous lookup once the map is in memory (returns null until then). */
+export function npcMeshInfoSync(displayId: number): { m: string; t?: string[] } | null {
+  return _map?.[String(displayId)] ?? null;
 }
 
 /** PNG filename for a texture full-name (must match l2-extract-npc-textures.mjs). */
@@ -53,7 +90,6 @@ export async function loadNpcMesh(meshFullName: string, opts: { targetHeight?: n
   const mat = new THREE.MeshStandardMaterial({ color: 0xb8ad97, roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide });
   disposables.push(mat);
 
-  // Apply the real diffuse texture (primary, from the npcgrp) if it decoded.
   if (opts.texName) {
     const url = `/models/npc/tex/${texFile(opts.texName)}`;
     new THREE.TextureLoader().load(
@@ -76,7 +112,6 @@ export async function loadNpcMesh(meshFullName: string, opts: { targetHeight?: n
     disposables.push(geo);
   }
 
-  // normalise: L2 meshes are z-up; rotate to y-up, scale to targetHeight, seat feet at y=0.
   group.rotation.x = -Math.PI / 2;
   const box = new THREE.Box3().setFromObject(group);
   const size = new THREE.Vector3(); box.getSize(size);
@@ -89,8 +124,16 @@ export async function loadNpcMesh(meshFullName: string, opts: { targetHeight?: n
   const c = new THREE.Vector3(); box2.getCenter(c);
   group.position.x -= c.x; group.position.z -= c.z;
 
-  // wrap so the caller can position the whole thing freely
   const wrap = new THREE.Group();
   wrap.add(group);
   return { group: wrap, dispose: () => disposables.forEach((d) => d.dispose()) };
+}
+
+/** Derive a human-ish display name from a mesh export ("LineageMonsters.gremlin_m00" → "Gremlin"). */
+export function prettyNpcName(meshFullName: string | undefined, fallback: string): string {
+  if (!meshFullName) return fallback;
+  const tail = meshFullName.split(".").pop() ?? meshFullName;
+  const stripped = tail.replace(/_[mfn]\d{2,}$/i, "").replace(/_(m|f|n)$/i, "").replace(/_/g, " ").trim();
+  if (!stripped) return fallback;
+  return stripped.replace(/\b\w/g, (c) => c.toUpperCase());
 }
