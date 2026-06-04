@@ -332,7 +332,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       candidates.sort((a, b) => a.d2 - b.d2);
       const radius2 = UPGRADE_RADIUS_SCENE * UPGRADE_RADIUS_SCENE;
       for (const { e, d2 } of candidates) {
-        const info = _map_sync_info(e.displayId);
+        const info = npcMeshInfoSync(e.displayId);
         const meshName = info?.m;
         const cached = meshName ? isNpcPkgLoaded(meshName) : false;
         if (cached) { void upgradeNpc(e); continue; }
@@ -341,15 +341,6 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         newPkgBudget--;
         void upgradeNpc(e);
       }
-    };
-    // Helper to avoid an async hop when the map is already resolved (it usually is).
-    const _map_sync_info = (displayId: number): { m?: string } | null => {
-      try {
-        // npcMeshInfo's promise resolves on its own; we just want the sync side.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const map = (npcMeshInfo as unknown as { _map?: Record<string, { m: string }> })._map;
-        return map?.[String(displayId)] ?? null;
-      } catch { return null; }
     };
     const pumpTimer = window.setInterval(pumpUpgrades, 600);
     // run once after a tiny delay so the first burst of spawns is handled
