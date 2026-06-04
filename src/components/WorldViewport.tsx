@@ -457,18 +457,30 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
         if (!bytes) { loadingTiles.delete(key); return; }
         try {
           const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+          let pct = 30;
           const g = await loadMap(ab, getPackage, {
             scale: SCALE,
             origin: { x: origin.x, y: origin.y, z: origin.z },
             bakedTerrain: loadBakedTerrain,
-            onProgress: (msg) => { if (!firstTileLoaded) setLoadStatus(msg); },
+            onProgress: (msg) => {
+              if (!firstTileLoaded) {
+                setLoadStatus(msg);
+                pct = Math.min(95, pct + 3);
+                onLoadProgressRef.current?.(pct, msg);
+              }
+            },
           });
           if (!loadingTiles.has(key)) { /* unloaded mid-flight */ } else {
             mapsRoot.add(g);
             loadedTiles.set(key, g);
+            const wasFirst = !firstTileLoaded;
             firstTileLoaded = true;
             setMapInfo({ path: `Maps/${key}.unr`, actors: g.userData.meshCount ?? 0, spawns: loadedTiles.size });
             setLoadStatus(`tiles: ${[...loadedTiles.keys()].join(", ")}`);
+            if (wasFirst) {
+              onLoadProgressRef.current?.(100, "Ready");
+              onReadyRef.current?.();
+            }
           }
         } catch (err) {
           console.warn("[tile] failed", key, err);
