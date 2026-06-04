@@ -491,10 +491,13 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
           if (!loadingTiles.has(key)) { /* unloaded mid-flight */ } else {
             mapsRoot.add(g);
             loadedTiles.set(key, g);
+            const wasFirst = !firstTileLoaded;
             firstTileLoaded = true;
             setMapInfo({ path: `Maps/${key}.unr`, actors: g.userData.meshCount ?? 0, spawns: loadedTiles.size });
-            setLoadStatus(`tiles: ${[...loadedTiles.keys()].join(", ")}`);
+            setLoadStatus(`tiles: ${[...loadedTiles.keys()].join(", ")}`, 100);
+            if (wasFirst) onReadyRef.current?.();
           }
+
         } catch (err) {
           console.warn("[tile] failed", key, err);
         }
