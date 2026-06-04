@@ -288,6 +288,10 @@ function WorldPage() {
         )}
       </SpriteProvider>
 
+      {/* NPC interaction layer (hover prompt + talk dialog). */}
+      <NpcInteractPrompt />
+      <NpcDialog onSay={(line) => setChat((c) => [...c, { color: "#9c906f", text: line }])} />
+
       <div className="absolute top-1.5 left-1/2 -translate-x-1/2 text-[8px] font-mono text-muted-foreground tracking-widest pointer-events-none z-50">
         L2SLAVE · {char?.name ?? "—"} · pkts {packetCount}
       </div>
