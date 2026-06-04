@@ -266,7 +266,10 @@ function WorldPage() {
               }}
               onInteract={() => {
                 const id = getSelectedTarget();
-                if (id != null) getGameConnection()?.sendAction(id);
+                if (id != null) {
+                  getGameConnection()?.sendAction(id);
+                  setDialogTarget(id);
+                }
               }}
               onMove={handleJoystick}
               onSay={(text) => getGameConnection()?.sendSay(text)}
