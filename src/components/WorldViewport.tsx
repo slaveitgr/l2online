@@ -547,6 +547,31 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       }
       updateCamera();
 
+      // Hover raycast (deferred from pointermove for cheap throttling).
+      if (hoverPending) {
+        hoverPending = false;
+        const id = pickNpcAt(pendingHoverX, pendingHoverY);
+        if (id !== lastHoverId) {
+          lastHoverId = id;
+          setHoveredTarget(id);
+          renderer.domElement.style.cursor = id !== null ? "pointer" : "default";
+        }
+      }
+
+      // Position highlight rings under hovered + selected NPCs.
+      const positionRing = (ring: THREE.Mesh, id: number | null) => {
+        if (id === null) { ring.visible = false; return; }
+        const em = entityModels.get(id);
+        if (em) { ring.position.set(em.scenePos.x, em.scenePos.y + 0.12, em.scenePos.z); ring.visible = true; return; }
+        const cap = entityMeshes.get(id);
+        if (cap) { ring.position.set(cap.position.x, 0.12, cap.position.z); ring.visible = true; return; }
+        ring.visible = false;
+      };
+      positionRing(hoverRing, lastHoverId);
+      positionRing(selectRing, getSelectedTarget());
+      hoverRing.scale.setScalar(1 + Math.sin(t * 6) * 0.05);
+      selectRing.scale.setScalar(1 + Math.sin(t * 4) * 0.03);
+
       playerRing.scale.setScalar(1 + Math.sin(t * 3) * 0.04);
       renderer.render(scene, camera);
       frameCount++;
