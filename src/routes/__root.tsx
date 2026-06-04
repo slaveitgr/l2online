@@ -10,6 +10,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { PortraitLockOverlay } from "../components/mobile/PortraitLockOverlay";
 
 function NotFoundComponent() {
   return (
@@ -122,6 +123,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />
+      <PortraitLockOverlay />
     </QueryClientProvider>
   );
 }
