@@ -51,6 +51,10 @@ export interface WorldEntity {
   y: number;
   z: number;
   heading: number;
+  isPlayer?: boolean; // true when spawned from CharInfo (another player)
+  name?: string; // visible name (players)
+  race?: number; // race ordinal (players) — for picking the right model
+  female?: boolean;
 }
 
 export type GameEvent =
@@ -88,6 +92,8 @@ const CHAR_TAIL_AFTER_LEVEL = 495;
 const OP_NPC_INFO = 0x0c;
 const OP_DELETE_OBJECT = 0x08;
 const OP_MOVE_TO_LOCATION = 0x2f;
+const OP_CHAR_INFO = 0x31; // other players entering broadcast range
+const OP_USER_INFO = 0x32; // our own state/position refresh (mask-based)
 
 type Phase = "auth" | "roster" | "selecting" | "entering" | "in-world";
 
@@ -272,6 +278,7 @@ export class L2GameClient {
       // ignored for now (chat, skills, inventory, ExPackets…).
       try {
         if (opcode === OP_NPC_INFO) this.parseNpcInfo(body);
+        else if (opcode === OP_CHAR_INFO) this.parseCharInfo(body);
         else if (opcode === OP_MOVE_TO_LOCATION) this.parseMoveToLocation(body);
         else if (opcode === OP_DELETE_OBJECT) this.parseDeleteObject(body);
       } catch {
@@ -421,20 +428,25 @@ export class L2GameClient {
     const ox = p?.x ?? x;
     const oy = p?.y ?? y;
     const oz = p?.z ?? z;
+    // MoveBackwardToLocation (client→server) = opcode 0x0F.
+    // Body: targetX,Y,Z, originX,Y,Z, movementMode(1=mouse).
     const body = new PacketWriter()
-      .u8(0x01)
+      .u8(0x0f)
       .u32(x | 0).u32(y | 0).u32(z | 0)
       .u32(ox | 0).u32(oy | 0).u32(oz | 0)
-      .u32(0)
+      .u32(1)
       .build();
     this.sendFrame(body, this.useEncryption);
+    // Optimistically advance our own origin so the next move's source is correct.
+    if (this._player) { this._player.x = x; this._player.y = y; this._player.z = z; }
   }
 
   sendAction(objectId: number, shift = false) {
     if (!this.connected) return;
     const p = this._player;
+    // Action (select / interact) = opcode 0x1F. Body: objectId, originX,Y,Z, actionByte.
     const body = new PacketWriter()
-      .u8(0x04)
+      .u8(0x1f)
       .u32(objectId)
       .u32((p?.x ?? 0) | 0)
       .u32((p?.y ?? 0) | 0)
@@ -578,6 +590,29 @@ export class L2GameClient {
     this.emit({ type: "npc-spawn", entity });
   }
 
+  /**
+   * CharInfo (0x31): another player entering broadcast range.
+   * Layout (Mobius 12.3): byte(GrandCrusade) int x int y int z int vehicleId
+   * int objId  utf16 name  short race  byte female  int classId … (rest ignored).
+   */
+  private parseCharInfo(body: Uint8Array) {
+    const r = new PacketReader(body);
+    r.u8(); // 0x31
+    r.u8(); // Grand Crusade flag
+    const x = r.u32() | 0;
+    const y = r.u32() | 0;
+    const z = r.u32() | 0;
+    r.u32(); // vehicleId
+    const objectId = r.u32();
+    const name = r.str();
+    const race = r.u16();
+    const female = r.u8() !== 0;
+    // (classId + paperdoll follow — not needed for placement)
+    const entity: WorldEntity = { objectId, displayId: -1, x, y, z, heading: 0, isPlayer: true, name, race, female };
+    this._entities.set(objectId, entity);
+    this.emit({ type: "npc-spawn", entity });
+  }
+
   /** MoveToLocation (0x2F): objectId + dest(x,y,z) + src(x,y,z). */
   private parseMoveToLocation(body: Uint8Array) {
     const r = new PacketReader(body);
@@ -586,6 +621,14 @@ export class L2GameClient {
     const x = r.u32() | 0;
     const y = r.u32() | 0;
     const z = r.u32() | 0;
+    // The server echoes our OWN movement here too — drive the player from it.
+    if (this._player && objectId === this._player.objectId) {
+      this._player.x = x;
+      this._player.y = y;
+      this._player.z = z;
+      this.emit({ type: "player", player: this._player });
+      return;
+    }
     const ent = this._entities.get(objectId);
     if (ent) {
       ent.x = x;

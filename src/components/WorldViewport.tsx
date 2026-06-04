@@ -23,14 +23,27 @@ const SCALE = 30;
 export interface WorldViewportProps {
   onTargetTap?: (objectId: number) => void;
   onGroundTap?: (x: number, y: number, z: number) => void;
+  onLoadProgress?: (pct: number, msg: string) => void;
+  onReady?: () => void;
 }
 
-export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps = {}) {
+export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onReady }: WorldViewportProps = {}) {
+  const onLoadProgressRef = useRef(onLoadProgress);
+  const onReadyRef = useRef(onReady);
+  onLoadProgressRef.current = onLoadProgress;
+  onReadyRef.current = onReady;
+
   const mountRef = useRef<HTMLDivElement>(null);
   const [fps, setFps] = useState(0);
   const [worldPos, setWorldPos] = useState<{ x: number; y: number; z: number } | null>(null);
   const [entityCount, setEntityCount] = useState(0);
-  const [loadStatus, setLoadStatus] = useState("Initializing…");
+  const [loadStatus, setLoadStatusRaw] = useState("Initializing…");
+  const setLoadStatus = (msg: string, pct?: number) => {
+    setLoadStatusRaw(msg);
+    if (pct != null) onLoadProgressRef.current?.(pct, msg);
+    else onLoadProgressRef.current?.(-1 as number, msg);
+  };
+
   const [assetSummary, setAssetSummary] = useState<{
     rootName: string;
     maps: CachedFileMeta[];
@@ -478,10 +491,13 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
           if (!loadingTiles.has(key)) { /* unloaded mid-flight */ } else {
             mapsRoot.add(g);
             loadedTiles.set(key, g);
+            const wasFirst = !firstTileLoaded;
             firstTileLoaded = true;
             setMapInfo({ path: `Maps/${key}.unr`, actors: g.userData.meshCount ?? 0, spawns: loadedTiles.size });
-            setLoadStatus(`tiles: ${[...loadedTiles.keys()].join(", ")}`);
+            setLoadStatus(`tiles: ${[...loadedTiles.keys()].join(", ")}`, 100);
+            if (wasFirst) onReadyRef.current?.();
           }
+
         } catch (err) {
           console.warn("[tile] failed", key, err);
         }
@@ -514,7 +530,9 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       tileTimer = window.setInterval(updateTiles, 1200); // re-check as the player moves
     })().catch((err) => {
       console.error("[map] loader failed", err);
-      setLoadStatus(`Map load failed: ${(err as Error).message}`);
+      setLoadStatus(`Map load failed: ${(err as Error).message}`, 100);
+      onReadyRef.current?.();
+
     });
 
     return () => {
