@@ -61,6 +61,12 @@ function WorldPage() {
   const [loadPct, setLoadPct] = useState(0);
   const [loadMsg, setLoadMsg] = useState("Initializing…");
 
+  useEffect(() => {
+    if (ready) return;
+    const t = setTimeout(() => setReady(true), 20000);
+    return () => clearTimeout(t);
+  }, [ready]);
+
   const joyRef = useRef<{ dx: number; dy: number; timer: ReturnType<typeof setInterval> | null }>({
     dx: 0,
     dy: 0,
