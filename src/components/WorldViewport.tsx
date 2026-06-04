@@ -131,23 +131,16 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
           if (c.race) race = c.race;
           if (c.gender === "M" || c.sex === 0 || c.sex === "0") gender = "M";
         }
-      } catch {
-        /* ignore */
-      }
+      } catch { /* ignore */ }
       loadCharacterModel(race, gender, { targetHeight: 3.4 })
         .then((handle) => {
-          if (!handle || playerModelDisposed) {
-            handle?.dispose();
-            return;
-          }
+          if (!handle || playerModelDisposed) { handle?.dispose(); return; }
           playerModel = handle;
           handle.group.position.set(0, 0, 0);
           scene.add(handle.group);
           scene.remove(playerMesh); // hide the placeholder cone
         })
-        .catch(() => {
-          /* keep cone */
-        });
+        .catch(() => {/* keep cone */});
     })();
 
     const playerRing = new THREE.Mesh(
@@ -355,16 +348,14 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       setLoadStatus("Reading mounted/cached client…");
       const [manifest, stats] = await Promise.all([getManifest().catch(() => null), getCacheStats().catch(() => null)]);
       const rootName = manifest?.rootName ?? "CDN cache";
-      const [cachedMaps, mountedMaps, cachedTextures, mountedTextures, cachedMeshes, mountedMeshes] = await Promise.all(
-        [
-          listFiles("maps").catch(() => []),
-          listMountFiles("Maps").catch(() => []),
-          listFiles("textures").catch(() => []),
-          listMountFiles("Textures").catch(() => []),
-          listFiles("staticmeshes").catch(() => []),
-          listMountFiles("StaticMeshes").catch(() => []),
-        ],
-      );
+      const [cachedMaps, mountedMaps, cachedTextures, mountedTextures, cachedMeshes, mountedMeshes] = await Promise.all([
+        listFiles("maps").catch(() => []),
+        listMountFiles("Maps").catch(() => []),
+        listFiles("textures").catch(() => []),
+        listMountFiles("Textures").catch(() => []),
+        listFiles("staticmeshes").catch(() => []),
+        listMountFiles("StaticMeshes").catch(() => []),
+      ]);
       const mapPaths = new Set<string>();
       const maps = [...mountedMaps, ...cachedMaps].filter((m) => {
         const key = m.path.toLowerCase();
@@ -381,13 +372,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       else setLoadStatus("No cache found · checking mounted client folder…");
 
       // Try preferred sectors first, then any cached map. Mount → cache fallback.
-      const candidates = [
-        "Maps/22_22.unr",
-        "maps/22_22.unr",
-        "Maps/17_25.unr",
-        "maps/17_25.unr",
-        ...maps.map((m) => m.path),
-      ];
+      const candidates = ["Maps/22_22.unr", "maps/22_22.unr", "Maps/17_25.unr", "maps/17_25.unr", ...maps.map((m) => m.path)];
       let pkg: L2Package | null = null;
       let pickedPath = "";
       let unrBytes: Uint8Array | null = null;
@@ -395,9 +380,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         try {
           const bytes = (await readFromMount(path)) ?? (await getFile(path));
           if (!bytes) continue;
-          pkg = L2Package.from(
-            bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
-          );
+          pkg = L2Package.from(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
           pickedPath = path;
           unrBytes = bytes;
           break;
@@ -405,10 +388,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
           console.warn("[map] failed to parse", path, err);
         }
       }
-      if (!pkg || !unrBytes) {
-        setLoadStatus("No parsable .unr available (mount or cache).");
-        return;
-      }
+      if (!pkg || !unrBytes) { setLoadStatus("No parsable .unr available (mount or cache)."); return; }
 
       const actors = pkg.readActorPlacements();
       const spawns = pkg.readActorPlacements(["PlayerStart"]);
@@ -430,11 +410,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       const meshFolder = [...mountedMeshes, ...cachedMeshes] as CachedFileMeta[];
       const meshIndex = new Map<string, string>(); // lower(basename) → path
       for (const f of meshFolder) {
-        const base = f.path
-          .split("/")
-          .pop()!
-          .replace(/\.usx$/i, "")
-          .toLowerCase();
+        const base = f.path.split("/").pop()!.replace(/\.usx$/i, "").toLowerCase();
         meshIndex.set(base, f.path);
       }
 
@@ -469,6 +445,9 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
           },
         );
         scene.add(mapGroup);
+        // If the map produced its own ground (terrain heightmap), drop the flat
+        // placeholder so the real textured floor shows. Keep it (invisible) for raycasts.
+        if (((mapGroup.userData.terrainMeshes as number) ?? 0) > 0) terrain.visible = false;
         setLoadStatus(`${pickedPath} · meshes assembled`);
       } catch (err) {
         console.error("[map] assemble failed, falling back to markers", err);
@@ -508,10 +487,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       entityMeshes.forEach((m) => scene.remove(m));
       entityMeshes.clear();
       playerModelDisposed = true;
-      if (playerModel) {
-        scene.remove(playerModel.group);
-        playerModel.dispose();
-      }
+      if (playerModel) { scene.remove(playerModel.group); playerModel.dispose(); }
       if (mapGroup) scene.remove(mapGroup);
       mapDisposables.forEach((d) => d.dispose());
       mount.removeChild(renderer.domElement);
