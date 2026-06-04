@@ -255,6 +255,10 @@ function WorldPage() {
       <div className="absolute top-1.5 left-1/2 -translate-x-1/2 text-[8px] font-mono text-muted-foreground tracking-widest pointer-events-none z-50">
         L2SLAVE · {char?.name ?? "—"} · pkts {packetCount}
       </div>
+
+      {!ready && (
+        <WorldPreloader percent={loadPct} message={loadMsg} charName={char?.name} />
+      )}
     </div>
   );
 }
