@@ -155,8 +155,35 @@ function WorldPage() {
   }, [navigate]);
 
   useEffect(() => {
-    if (isMobile) void lockLandscape();
+    if (!isMobile) return;
+    void lockLandscape();
+
+    // On first user gesture: request fullscreen + resume any AudioContext so sound is on by default.
+    const onFirstTap = () => {
+      try {
+        const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => Promise<void> };
+        const req = el.requestFullscreen ?? el.webkitRequestFullscreen;
+        if (req && !document.fullscreenElement) void req.call(el).catch(() => {});
+      } catch { /* ignore */ }
+      try {
+        const w = window as unknown as { __l2AudioCtx?: AudioContext; AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
+        const Ctor = w.AudioContext ?? w.webkitAudioContext;
+        if (Ctor) {
+          if (!w.__l2AudioCtx) w.__l2AudioCtx = new Ctor();
+          if (w.__l2AudioCtx.state === "suspended") void w.__l2AudioCtx.resume().catch(() => {});
+        }
+      } catch { /* ignore */ }
+      window.removeEventListener("pointerdown", onFirstTap);
+      window.removeEventListener("touchstart", onFirstTap);
+    };
+    window.addEventListener("pointerdown", onFirstTap, { once: false });
+    window.addEventListener("touchstart", onFirstTap, { once: false, passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", onFirstTap);
+      window.removeEventListener("touchstart", onFirstTap);
+    };
   }, [isMobile]);
+
 
   useEffect(() => {
     return () => {
