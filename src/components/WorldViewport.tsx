@@ -222,15 +222,28 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     };
 
     // Async: pick the best model for an NPC — exact npcgrp mesh first, then a
-    // race/sex body, else leave the capsule.
+    // race/sex body, else leave the capsule. Called only for nearby NPCs by the
+    // streaming gate below (see `pumpUpgrades`).
+    const inflightUpgrades = new Set<number>();
+    const upgradedOrSkipped = new Set<number>(); // already loaded OR no model available
     const upgradeNpc = async (e: WorldEntity) => {
-      const info = await npcMeshInfo(e.displayId);
-      if (info?.m) {
-        placeModel(e.objectId, e.x, e.y, e.z, () => loadNpcMesh(info.m, { targetHeight: 3.4, texName: info.t?.[0] }), () => dropCapsule(e.objectId));
-        if (entityModels.has(e.objectId)) return;
+      if (inflightUpgrades.has(e.objectId) || upgradedOrSkipped.has(e.objectId)) return;
+      inflightUpgrades.add(e.objectId);
+      try {
+        const info = await npcMeshInfo(e.displayId);
+        if (info?.m) {
+          placeModel(e.objectId, e.x, e.y, e.z, () => loadNpcMesh(info.m, { targetHeight: 3.4, texName: info.t?.[0] }), () => dropCapsule(e.objectId));
+          upgradedOrSkipped.add(e.objectId);
+          return;
+        }
+        const a = npcAppearance[String(e.displayId)];
+        if (a) {
+          placeModel(e.objectId, e.x, e.y, e.z, () => loadCharacterModel(a[0], a[1] as "F" | "M", { targetHeight: 3.4 }), () => dropCapsule(e.objectId));
+        }
+        upgradedOrSkipped.add(e.objectId);
+      } finally {
+        inflightUpgrades.delete(e.objectId);
       }
-      const a = npcAppearance[String(e.displayId)];
-      if (a) placeModel(e.objectId, e.x, e.y, e.z, () => loadCharacterModel(a[0], a[1] as "F" | "M", { targetHeight: 3.4 }), () => dropCapsule(e.objectId));
     };
 
     const upsert = (e: WorldEntity) => {
@@ -240,8 +253,9 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         placeModel(e.objectId, e.x, e.y, e.z, () => loadCharacterModel(race, gender, { targetHeight: 3.4 }));
         return;
       }
-      ensureCapsule(e);        // show something immediately
-      void upgradeNpc(e);      // then swap in the exact mesh / body when ready
+      ensureCapsule(e);   // always show a marker immediately
+      // mesh upgrade is deferred — `pumpUpgrades` decides when it's worth fetching
+      // the multi-MB package for this NPC's distance from the player.
     };
     const moveEntity = (objectId: number, x: number, y: number, z: number) => {
       const em = entityModels.get(objectId);
