@@ -284,18 +284,76 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     conn?.getEntities().forEach(upsert);
     setEntityCount(entityCount());
 
-    // Load the humanoid-NPC race/sex fallback table, then retry the upgrade for
-    // any NPC still shown as a capsule (e.g. no exact mesh available).
+    // Load the humanoid-NPC race/sex fallback table. The streaming pump (below)
+    // will pick up any NPC eligible for upgrade once this table is available.
     fetch("/models/npc-appearance.json")
       .then((r) => (r.ok ? r.json() : {}))
-      .then((table: Record<string, [string, "M" | "F"]>) => {
-        npcAppearance = table || {};
-        for (const e of conn?.getEntities() ?? []) {
-          if (!e.isPlayer && entityMeshes.has(e.objectId) && !entityModels.has(e.objectId)) void upgradeNpc(e);
-        }
-        setEntityCount(entityCount());
-      })
+      .then((table: Record<string, [string, "M" | "F"]>) => { npcAppearance = table || {}; })
       .catch(() => {/* keep capsules */});
+
+    // ── Selection / hover highlight rings ────────────────────────────────
+    const makeRing = (color: number, inner: number, outer: number, opacity: number) => {
+      const m = new THREE.Mesh(
+        new THREE.RingGeometry(inner, outer, 48),
+        new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity, depthWrite: false }),
+      );
+      m.rotation.x = -Math.PI / 2;
+      m.position.y = 0.12;
+      m.visible = false;
+      m.renderOrder = 2;
+      scene.add(m);
+      return m;
+    };
+    const hoverRing = makeRing(0xf6e7a6, 1.4, 1.9, 0.55);
+    const selectRing = makeRing(0xe24a3a, 1.7, 2.2, 0.85);
+    // Track hover id in a local mirror so we can clear it cheaply.
+    let lastHoverId: number | null = null;
+
+    // ── NPC mesh streaming pump ──────────────────────────────────────────
+    // Only upgrade NPCs near the player. Re-evaluated every ~600ms. This caps the
+    // worst case (hundreds of spawns) at a handful of package fetches and lets the
+    // network/CPU stay responsive while the map tiles stream in.
+    const UPGRADE_RADIUS_SCENE = 90; // ~2700 L2 units around the player
+    const pumpUpgrades = () => {
+      if (!conn) return;
+      // 1) NPCs already in a loaded package upgrade for free → always allowed.
+      // 2) Others must be within radius AND we cap "new package" work per tick.
+      let newPkgBudget = 1;
+      const ents = conn.getEntities();
+      // Pre-sort by distance so the closest NPCs get prioritised.
+      const candidates: Array<{ e: WorldEntity; d2: number }> = [];
+      for (const e of ents) {
+        if (e.isPlayer) continue;
+        if (entityModels.has(e.objectId) || inflightUpgrades.has(e.objectId) || upgradedOrSkipped.has(e.objectId)) continue;
+        const p = toScene(e.x, e.y, e.z);
+        const dx = p.x - playerScenePos.x, dz = p.z - playerScenePos.z;
+        candidates.push({ e, d2: dx * dx + dz * dz });
+      }
+      candidates.sort((a, b) => a.d2 - b.d2);
+      const radius2 = UPGRADE_RADIUS_SCENE * UPGRADE_RADIUS_SCENE;
+      for (const { e, d2 } of candidates) {
+        const info = _map_sync_info(e.displayId);
+        const meshName = info?.m;
+        const cached = meshName ? isNpcPkgLoaded(meshName) : false;
+        if (cached) { void upgradeNpc(e); continue; }
+        if (d2 > radius2) continue;
+        if (newPkgBudget <= 0) continue;
+        newPkgBudget--;
+        void upgradeNpc(e);
+      }
+    };
+    // Helper to avoid an async hop when the map is already resolved (it usually is).
+    const _map_sync_info = (displayId: number): { m?: string } | null => {
+      try {
+        // npcMeshInfo's promise resolves on its own; we just want the sync side.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const map = (npcMeshInfo as unknown as { _map?: Record<string, { m: string }> })._map;
+        return map?.[String(displayId)] ?? null;
+      } catch { return null; }
+    };
+    const pumpTimer = window.setInterval(pumpUpgrades, 600);
+    // run once after a tiny delay so the first burst of spawns is handled
+    window.setTimeout(pumpUpgrades, 250);
 
     const setPlayerTarget = (wx: number, wy: number, wz: number) => {
       const p = toScene(wx, wy, wz);
