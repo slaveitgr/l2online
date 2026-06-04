@@ -57,6 +57,9 @@ function WorldPage() {
   const [packetCount, setPacketCount] = useState(0);
   const { isMobile, isLandscape } = useIsMobileGame();
   const targetId = useSelectedTarget();
+  const [ready, setReady] = useState(false);
+  const [loadPct, setLoadPct] = useState(0);
+  const [loadMsg, setLoadMsg] = useState("Initializing…");
 
   const joyRef = useRef<{ dx: number; dy: number; timer: ReturnType<typeof setInterval> | null }>({
     dx: 0,
