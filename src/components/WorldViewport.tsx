@@ -75,19 +75,16 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     fill.position.set(-90, 70, -60);
     scene.add(fill);
 
-    // ── Ground (placeholder heightmap) ───────────────────────────────────
-    const terrainGeom = new THREE.PlaneGeometry(400, 400, 80, 80);
+    // ── Ground ───────────────────────────────────────────────────────────
+    // A large FLAT neutral stone plane at foot level — believable town ground and
+    // the click-to-move raycast target. It is hidden once the real map's own
+    // terrain/floors assemble (so it never double-covers the real geometry), but
+    // stays in the scene graph (invisible objects still raycast) for click-to-move.
+    const terrainGeom = new THREE.PlaneGeometry(2000, 2000, 1, 1);
     terrainGeom.rotateX(-Math.PI / 2);
-    const tp = terrainGeom.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < tp.count; i++) {
-      const x = tp.getX(i);
-      const z = tp.getZ(i);
-      const h = Math.sin(x * 0.04) * 3 + Math.cos(z * 0.05) * 2.5 + Math.sin((x + z) * 0.02) * 4;
-      tp.setY(i, h);
-    }
-    terrainGeom.computeVertexNormals();
-    const terrainMat = new THREE.MeshStandardMaterial({ color: 0x4a3522, roughness: 0.95 });
+    const terrainMat = new THREE.MeshStandardMaterial({ color: 0x6f675b, roughness: 0.96, metalness: 0 });
     const terrain = new THREE.Mesh(terrainGeom, terrainMat);
+    terrain.position.y = -0.05;
     terrain.receiveShadow = true;
     scene.add(terrain);
 
