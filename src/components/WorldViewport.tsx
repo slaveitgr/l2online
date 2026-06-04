@@ -515,6 +515,8 @@ export function WorldViewport({ onTargetTap, onGroundTap, onLoadProgress, onRead
     })().catch((err) => {
       console.error("[map] loader failed", err);
       setLoadStatus(`Map load failed: ${(err as Error).message}`);
+      onLoadProgressRef.current?.(100, "Map load failed");
+      onReadyRef.current?.();
     });
 
     return () => {
