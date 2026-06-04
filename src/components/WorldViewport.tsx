@@ -452,9 +452,29 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
           const g = await loadMap(ab, getPackage, {
             scale: SCALE,
             origin: { x: origin.x, y: origin.y, z: origin.z },
-            bakedTerrain: loadBakedTerrain,
+            skipTerrain: true, // we draw a flat baked floor (reliable height) below
             onProgress: (msg) => { if (!firstTileLoaded) setLoadStatus(msg); },
           });
+          // Flat textured ground for this tile from the pre-baked splatmap. A flat plane
+          // at foot level is reliable (the heightmap geometry mis-positions/floats), and
+          // L2 town plazas are near-flat anyway.
+          const baked = await loadBakedTerrain(tx, ty);
+          if (baked) {
+            baked.colorSpace = THREE.SRGBColorSpace;
+            baked.anisotropy = 8;
+            baked.needsUpdate = true;
+            const TILE_SCENE = TILE_UNITS / SCALE; // one tile in scene units
+            const floorGeo = new THREE.PlaneGeometry(TILE_SCENE, TILE_SCENE);
+            floorGeo.rotateX(-Math.PI / 2);
+            const floor = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({ map: baked, roughness: 1, metalness: 0 }));
+            // tile centre in world → scene (matches toScene: x→x, y→-z)
+            const cwx = (tx - 20) * TILE_UNITS + TILE_UNITS / 2;
+            const cwy = (ty - 18) * TILE_UNITS + TILE_UNITS / 2;
+            floor.position.set((cwx - origin.x) / SCALE, -0.15, -(cwy - origin.y) / SCALE);
+            floor.receiveShadow = true;
+            floor.renderOrder = -1;
+            g.add(floor);
+          }
           if (!loadingTiles.has(key)) { /* unloaded mid-flight */ } else {
             mapsRoot.add(g);
             loadedTiles.set(key, g);
