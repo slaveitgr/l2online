@@ -4,9 +4,15 @@ import { listFiles, getManifest, getCacheStats, getFile, formatBytes, type Cache
 import { listMountFiles, readFromMount } from "@/lib/local-mount";
 import { loadMap } from "@/lib/map-loader";
 import { getGameConnection, type GameEvent, type WorldEntity } from "@/lib/l2-protocol/game-client";
-import { setSelectedTarget } from "@/lib/game-state";
+import {
+  setSelectedTarget,
+  setHoveredTarget,
+  getSelectedTarget,
+  setDialogTarget,
+  getDialogTarget,
+} from "@/lib/game-state";
 import { loadCharacterModel, type CharacterModelHandle } from "@/lib/character-mesh";
-import { loadNpcMesh, npcMeshInfo } from "@/lib/npc-mesh";
+import { loadNpcMesh, npcMeshInfo, isNpcPkgLoaded } from "@/lib/npc-mesh";
 
 /**
  * Phase 1.5 viewport.
