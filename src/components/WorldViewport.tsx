@@ -220,7 +220,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     const upgradeNpc = async (e: WorldEntity) => {
       const info = await npcMeshInfo(e.displayId);
       if (info?.m) {
-        placeModel(e.objectId, e.x, e.y, e.z, () => loadNpcMesh(info.m, { targetHeight: 3.4 }), () => dropCapsule(e.objectId));
+        placeModel(e.objectId, e.x, e.y, e.z, () => loadNpcMesh(info.m, { targetHeight: 3.4, texName: info.t?.[0] }), () => dropCapsule(e.objectId));
         if (entityModels.has(e.objectId)) return;
       }
       const a = npcAppearance[String(e.displayId)];
