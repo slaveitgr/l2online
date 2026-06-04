@@ -10,6 +10,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 const CLIENT_VIDEO = "/hud/videos/login_web.mp4";
+const CLIENT_POSTER = "/hud/screens/LogonScreen.png";
 
 const SIDE_LINKS: { label: string; href?: string; to?: string }[] = [
   { label: "New Account", href: "https://www.slave.gr/register" },
@@ -24,7 +25,7 @@ const sideLinkStyle = {
   fontSize: 13,
   fontFamily: "Arial, Helvetica, sans-serif",
   textShadow: "0 1px 2px #000, 0 0 4px #000",
-  letterSpacing: 0.5,
+  letterSpacing: 0,
   cursor: "pointer",
 } as const;
 
@@ -71,7 +72,7 @@ function SideLinks({ onUpdate, updating }: { onUpdate: () => void; updating: boo
         }}
         title="Clear CDN cache and reload"
       >
-        {updating ? "Updating…" : "Update"}
+        {updating ? "Updating..." : "Update"}
       </button>
     </div>
   );
@@ -100,7 +101,7 @@ function BrandBar() {
       <span
         style={{
           fontWeight: 800,
-          letterSpacing: 1,
+          letterSpacing: 0,
           color: "#fff",
           background: "#000",
           padding: "1px 6px",
@@ -114,7 +115,7 @@ function BrandBar() {
       <span
         style={{
           fontFamily: "Cinzel, 'Trajan Pro', Georgia, serif",
-          letterSpacing: 5,
+          letterSpacing: 0,
           color: "#e6dcb6",
           fontSize: 14,
           fontWeight: 600,
@@ -140,7 +141,7 @@ function BrandBar() {
             verticalAlign: "middle",
           }}
         >
-          ✦
+          *
         </span>
         slave.gr
       </span>
@@ -171,7 +172,7 @@ function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void 
         border: "1px solid #6a5630",
         boxShadow: "inset 0 1px 0 rgba(255,235,180,0.10), 0 2px 6px rgba(0,0,0,0.7)",
         color: "#e6dcb6",
-        fontSize: 16,
+        fontSize: 13,
         cursor: "pointer",
         textShadow: "0 1px 2px #000",
         display: "flex",
@@ -179,7 +180,7 @@ function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void 
         justifyContent: "center",
       }}
     >
-      {muted ? "🔇" : "🔊"}
+      {muted ? "off" : "on"}
     </button>
   );
 }
@@ -246,6 +247,7 @@ export function L2LauncherShell({ children }: { children: ReactNode }) {
       <video
         ref={videoRef}
         src={CLIENT_VIDEO}
+        poster={CLIENT_POSTER}
         autoPlay
         muted={muted}
         loop
