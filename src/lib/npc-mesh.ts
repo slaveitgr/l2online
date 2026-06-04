@@ -34,8 +34,11 @@ export async function npcMeshInfo(displayId: number): Promise<{ m: string; t?: s
   return map[String(displayId)] ?? null;
 }
 
+/** PNG filename for a texture full-name (must match l2-extract-npc-textures.mjs). */
+function texFile(full: string): string { return full.replace(/[^A-Za-z0-9]+/g, "_") + ".png"; }
+
 /** Build a renderable group for a "Pkg.export" mesh name, or null if unavailable. */
-export async function loadNpcMesh(meshFullName: string, opts: { targetHeight?: number } = {}): Promise<NpcMeshHandle | null> {
+export async function loadNpcMesh(meshFullName: string, opts: { targetHeight?: number; texName?: string } = {}): Promise<NpcMeshHandle | null> {
   const dot = meshFullName.indexOf(".");
   if (dot < 0) return null;
   const pkgName = meshFullName.slice(0, dot);
@@ -46,9 +49,20 @@ export async function loadNpcMesh(meshFullName: string, opts: { targetHeight?: n
 
   const group = new THREE.Group();
   group.name = `Npc:${meshFullName}`;
-  const disposables: Array<THREE.BufferGeometry | THREE.Material> = [];
+  const disposables: Array<THREE.BufferGeometry | THREE.Material | THREE.Texture> = [];
   const mat = new THREE.MeshStandardMaterial({ color: 0xb8ad97, roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide });
   disposables.push(mat);
+
+  // Apply the real diffuse texture (primary, from the npcgrp) if it decoded.
+  if (opts.texName) {
+    const url = `/models/npc/tex/${texFile(opts.texName)}`;
+    new THREE.TextureLoader().load(
+      url,
+      (tex) => { tex.colorSpace = THREE.SRGBColorSpace; tex.flipY = false; tex.anisotropy = 4; mat.map = tex; mat.color.set(0xffffff); mat.needsUpdate = true; disposables.push(tex); },
+      undefined,
+      () => {/* keep neutral material if the texture isn't available */},
+    );
+  }
 
   for (const part of entry.parts) {
     const geo = new THREE.BufferGeometry();
