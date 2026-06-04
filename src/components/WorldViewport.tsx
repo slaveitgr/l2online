@@ -483,7 +483,27 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     renderer.domElement.addEventListener("pointerdown", onDown);
     renderer.domElement.addEventListener("pointermove", onMove);
     renderer.domElement.addEventListener("pointerup", onUp);
+    renderer.domElement.addEventListener("pointerleave", onPointerLeave);
     renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
+
+    // Keyboard: T (or Enter) opens the talk dialog for the selected NPC.
+    // Esc closes it (or clears the selection if no dialog is open).
+    const onKey = (e: KeyboardEvent) => {
+      // Ignore when typing in chat / inputs.
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      if (e.key === "t" || e.key === "T" || e.key === "Enter") {
+        const sel = getSelectedTarget();
+        if (sel !== null) {
+          setDialogTarget(sel);
+          e.preventDefault();
+        }
+      } else if (e.key === "Escape") {
+        if (getDialogTarget() !== null) setDialogTarget(null);
+        else setSelectedTarget(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
 
     const onResize = () => {
       camera.aspect = mount.clientWidth / mount.clientHeight;
