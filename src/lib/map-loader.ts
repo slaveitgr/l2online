@@ -26,6 +26,8 @@ export interface LoadMapOptions {
   onProgress?: (msg: string) => void;
   /** Optional pre-baked terrain splatmap (tools/l2-bake-terrain.mjs) → one ground texture. */
   bakedTerrain?: (mapX: number, mapY: number) => Promise<THREE.Texture | null>;
+  /** Skip the heightmap terrain meshes (the caller draws a flat baked floor instead). */
+  skipTerrain?: boolean;
 }
 
 const DEFAULT_SKIP = (n: string) => /sky|cloud|backdrop/i.test(n);
@@ -252,7 +254,7 @@ export async function loadMap(
 
   let terrainMeshes = 0;
   let terrainLayered = 0;
-  for (const terrain of terrains) {
+  for (const terrain of (opts.skipTerrain ? [] : terrains)) {
     if (!terrain.terrainMap) continue;
     const hmPkg = await getPkg(terrain.terrainMap.target.pkg);
     const heightmap = hmPkg?.readTexture(terrain.terrainMap.target.name);
