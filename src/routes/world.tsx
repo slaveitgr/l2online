@@ -2,10 +2,11 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { WorldViewport } from "@/components/WorldViewport";
 import {
-  L2HudAuthentic,
   type HudActiveChar,
   type HudChatLine,
 } from "@/components/hud/L2HudAuthentic";
+import { DesktopHud } from "@/components/hud/desktop/DesktopHud";
+
 import { SpriteProvider } from "@/components/hud/L2Sprite";
 import { MobileGameHud } from "@/components/mobile/MobileGameHud";
 import { RotateDeviceOverlay } from "@/components/mobile/RotateDeviceOverlay";
@@ -222,12 +223,8 @@ function WorldPage() {
       <WorldViewport
         onTargetTap={(id) => getGameConnection()?.sendAction(id)}
         onGroundTap={(x, y, z) => getGameConnection()?.sendMoveTo(x, y, z)}
-        onLoadProgress={(pct, msg) => {
-          setLoadPct((prev) => (pct > prev ? pct : prev));
-          setLoadMsg(msg);
-        }}
-        onReady={() => setReady(true)}
       />
+
 
       <SpriteProvider>
         {isMobile ? (
@@ -249,12 +246,13 @@ function WorldPage() {
             <RotateDeviceOverlay />
           )
         ) : (
-          <L2HudAuthentic
+          <DesktopHud
             activeChar={char ?? undefined}
             chatLines={chat}
             onExit={leaveWorld}
             onSendChat={sendChat}
           />
+
         )}
       </SpriteProvider>
 
