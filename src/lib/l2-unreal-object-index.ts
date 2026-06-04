@@ -102,6 +102,13 @@ export interface IndexedMapPlacement extends MapPlacement {
   rawProperties: UnrealProperty[];
 }
 
+export interface TerrainLayerRef {
+  texture: UnrealObjectRef | null;
+  alphaMap: UnrealObjectRef | null;
+  uScale: number;
+  vScale: number;
+}
+
 export interface IndexedTerrainInfo {
   exportIndex: number;
   objectName: string;
@@ -115,6 +122,7 @@ export interface IndexedTerrainInfo {
   quadVisibilityBitmap: UnrealRawArray | null;
   edgeTurnBitmap: UnrealRawArray | null;
   layerCount: number;
+  terrainLayers: TerrainLayerRef[];
   rawProperties: UnrealProperty[];
 }
 
@@ -167,7 +175,19 @@ export function readIndexedTerrainInfos(pkg: L2Package): IndexedTerrainInfo[] {
     const scale = tupleProp(props, "TerrainScale", 3) ?? [0, 0, 0];
     const loc = tupleProp(props, "Location", 3) ?? [0, 0, 0];
     const rot = tupleProp(props, "Rotation", 3) ?? [0, 0, 0];
-    const layers = properties.filter((p) => p.name === "Layers" && p.structName === "TerrainLayer").length;
+    const layerProps = properties.filter((p) => p.name === "Layers" && p.structName === "TerrainLayer");
+    const terrainLayers: TerrainLayerRef[] = layerProps.map((lp) => {
+      const nested = Array.isArray(lp.value) ? (lp.value as unknown[]).filter((v): v is UnrealProperty => !!v && typeof v === "object" && "name" in (v as object)) : [];
+      const m = propsByName(nested);
+      const mapping = m.get("TextureMapping")?.value;
+      const mp = Array.isArray(mapping) ? propsByName(mapping.filter((v): v is UnrealProperty => !!v && typeof v === "object" && "name" in (v as object))) : new Map<string, UnrealProperty>();
+      return {
+        texture: objectProp(m, "Texture"),
+        alphaMap: objectProp(m, "AlphaMap"),
+        uScale: numberProp(mp, "UScale") ?? 0,
+        vScale: numberProp(mp, "VScale") ?? 0,
+      };
+    });
 
     terrains.push({
       exportIndex: i + 1,
@@ -181,7 +201,8 @@ export function readIndexedTerrainInfos(pkg: L2Package): IndexedTerrainInfo[] {
       mapY: numberProp(props, "MapY") ?? 0,
       quadVisibilityBitmap: rawArrayProp(props, "QuadVisibilityBitmap"),
       edgeTurnBitmap: rawArrayProp(props, "EdgeTurnBitmap"),
-      layerCount: layers,
+      layerCount: layerProps.length,
+      terrainLayers,
       rawProperties: properties,
     });
   });
