@@ -9,6 +9,7 @@ import {
 import { SpriteProvider } from "@/components/hud/L2Sprite";
 import { MobileGameHud } from "@/components/mobile/MobileGameHud";
 import { RotateDeviceOverlay } from "@/components/mobile/RotateDeviceOverlay";
+import { WorldPreloader } from "@/components/WorldPreloader";
 import { useIsMobileGame } from "@/hooks/useIsMobileGame";
 import { lockLandscape } from "@/lib/mobile/orientation";
 import {
