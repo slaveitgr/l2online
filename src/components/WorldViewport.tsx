@@ -6,6 +6,7 @@ import { loadMap } from "@/lib/map-loader";
 import { getGameConnection, type GameEvent, type WorldEntity } from "@/lib/l2-protocol/game-client";
 import { setSelectedTarget } from "@/lib/game-state";
 import { loadCharacterModel, type CharacterModelHandle } from "@/lib/character-mesh";
+import { loadNpcMesh, npcMeshInfo } from "@/lib/npc-mesh";
 
 /**
  * Phase 1.5 viewport.
@@ -159,33 +160,28 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     const npcMat = new THREE.MeshStandardMaterial({ color: 0xb5483a, roughness: 0.7 });
     const entityMeshes = new Map<number, THREE.Mesh>(); // capsules (NPCs)
 
+    interface ModelHandle { group: THREE.Object3D; dispose: () => void; }
     interface EntityModel {
-      handle: CharacterModelHandle | null;
+      handle: ModelHandle | null;
       scenePos: THREE.Vector3;
       target: THREE.Vector3;
       yaw: number;
       yawTarget: number;
     }
-    const entityModels = new Map<number, EntityModel>(); // real body models (players + humanoid NPCs)
+    const entityModels = new Map<number, EntityModel>(); // real meshes (players + NPCs)
 
-    // npc-id → [raceName, "M"|"F"] for HUMANOID (player-race) town NPCs, derived
-    // from the server data. Monsters aren't in here → they stay capsules.
+    // npc-id → [raceName, "M"|"F"] fallback for humanoid NPCs without an exact mesh.
     let npcAppearance: Record<string, [string, "M" | "F"]> = {};
 
-    // Decide whether an entity should get a real body model, and which race/gender.
-    const wantsModel = (e: WorldEntity): { race: string; gender: "F" | "M" } | null => {
-      if (e.isPlayer) return { race: RACE_BY_ORDINAL[e.race ?? 0] ?? "Human", gender: e.female ? "F" : "M" };
-      const a = npcAppearance[String(e.displayId)];
-      return a ? { race: a[0], gender: a[1] } : null;
-    };
-
-    const placeModel = (objectId: number, x: number, y: number, z: number, race: string, gender: "F" | "M") => {
-      const p = toScene(x, y, z); // feet at ground (model seats feet at y=0)
+    // Create/refresh the smooth-chase record for an entity and load its model via `loader`.
+    const placeModel = (objectId: number, x: number, y: number, z: number,
+                        loader: () => Promise<ModelHandle | null>, onAttached?: () => void) => {
+      const p = toScene(x, y, z); // feet at ground (models seat feet at y=0)
       let em = entityModels.get(objectId);
       if (!em) {
         em = { handle: null, scenePos: p.clone(), target: p.clone(), yaw: 0, yawTarget: 0 };
         entityModels.set(objectId, em);
-        loadCharacterModel(race, gender, { targetHeight: 3.4 })
+        loader()
           .then((handle) => {
             const still = entityModels.get(objectId);
             if (!handle || !still) { handle?.dispose(); return; }
@@ -193,6 +189,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
             handle.group.position.copy(still.scenePos);
             handle.group.userData.objectId = objectId; // selectable
             scene.add(handle.group);
+            onAttached?.();
           })
           .catch(() => {/* ignore */});
       } else {
@@ -202,9 +199,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       }
     };
 
-    const upsert = (e: WorldEntity) => {
-      const want = wantsModel(e);
-      if (want) { placeModel(e.objectId, e.x, e.y, e.z, want.race, want.gender); return; }
+    const ensureCapsule = (e: WorldEntity) => {
       let m = entityMeshes.get(e.objectId);
       if (!m) {
         m = new THREE.Mesh(npcGeom, npcMat);
@@ -213,9 +208,34 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         scene.add(m);
         entityMeshes.set(e.objectId, m);
       }
-      const p = toScene(e.x, e.y, e.z);
-      p.y += 1.7;
-      m.position.copy(p);
+      const p = toScene(e.x, e.y, e.z); p.y += 1.7; m.position.copy(p);
+    };
+    const dropCapsule = (objectId: number) => {
+      const m = entityMeshes.get(objectId);
+      if (m) { scene.remove(m); entityMeshes.delete(objectId); }
+    };
+
+    // Async: pick the best model for an NPC — exact npcgrp mesh first, then a
+    // race/sex body, else leave the capsule.
+    const upgradeNpc = async (e: WorldEntity) => {
+      const info = await npcMeshInfo(e.displayId);
+      if (info?.m) {
+        placeModel(e.objectId, e.x, e.y, e.z, () => loadNpcMesh(info.m, { targetHeight: 3.4 }), () => dropCapsule(e.objectId));
+        if (entityModels.has(e.objectId)) return;
+      }
+      const a = npcAppearance[String(e.displayId)];
+      if (a) placeModel(e.objectId, e.x, e.y, e.z, () => loadCharacterModel(a[0], a[1] as "F" | "M", { targetHeight: 3.4 }), () => dropCapsule(e.objectId));
+    };
+
+    const upsert = (e: WorldEntity) => {
+      if (e.isPlayer) {
+        const race = RACE_BY_ORDINAL[e.race ?? 0] ?? "Human";
+        const gender: "F" | "M" = e.female ? "F" : "M";
+        placeModel(e.objectId, e.x, e.y, e.z, () => loadCharacterModel(race, gender, { targetHeight: 3.4 }));
+        return;
+      }
+      ensureCapsule(e);        // show something immediately
+      void upgradeNpc(e);      // then swap in the exact mesh / body when ready
     };
     const moveEntity = (objectId: number, x: number, y: number, z: number) => {
       const em = entityModels.get(objectId);
@@ -244,19 +264,14 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     conn?.getEntities().forEach(upsert);
     setEntityCount(entityCount());
 
-    // Load the humanoid-NPC appearance table, then upgrade any town NPCs that
-    // are currently capsules into their real race/gender body models.
+    // Load the humanoid-NPC race/sex fallback table, then retry the upgrade for
+    // any NPC still shown as a capsule (e.g. no exact mesh available).
     fetch("/models/npc-appearance.json")
       .then((r) => (r.ok ? r.json() : {}))
       .then((table: Record<string, [string, "M" | "F"]>) => {
         npcAppearance = table || {};
         for (const e of conn?.getEntities() ?? []) {
-          const want = wantsModel(e);
-          if (want && entityMeshes.has(e.objectId)) {
-            const m = entityMeshes.get(e.objectId)!;
-            scene.remove(m); entityMeshes.delete(e.objectId); // drop the capsule
-            placeModel(e.objectId, e.x, e.y, e.z, want.race, want.gender);
-          }
+          if (!e.isPlayer && entityMeshes.has(e.objectId) && !entityModels.has(e.objectId)) void upgradeNpc(e);
         }
         setEntityCount(entityCount());
       })
