@@ -12,7 +12,7 @@ import {
   getDialogTarget,
 } from "@/lib/game-state";
 import { loadCharacterModel, type CharacterModelHandle } from "@/lib/character-mesh";
-import { loadNpcMesh, npcMeshInfo, npcMeshInfoSync, isNpcPkgLoaded, prettyNpcName } from "@/lib/npc-mesh";
+import { loadNpcMesh, npcMeshInfo, npcMeshInfoSync, isNpcPkgLoaded } from "@/lib/npc-mesh";
 
 /**
  * Phase 1.5 viewport.
