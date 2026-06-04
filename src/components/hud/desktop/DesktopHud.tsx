@@ -426,21 +426,21 @@ function QuestNotifOverlay({ onClose }: { onClose: () => void }) {
 /* -------------------------------------------------------------------------- */
 
 const RIGHT_RAIL_TARGETS: (XdatWindowKey | null)[] = [
-  null, // 1 (diamond/decor)
   null,
   null,
   null,
-  "inventory",
+  null,
+  "equipment",
   "character",
   "skills",
   "quest",
   "map",
-  "friends",
+  "contacts",
   "clan",
-  "mail",
-  "settings",
-  null,
-  null,
+  "mailbox",
+  "macro",
+  "collection",
+  "community",
   null,
   null,
   null,
