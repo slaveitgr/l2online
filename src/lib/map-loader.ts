@@ -24,6 +24,8 @@ export interface LoadMapOptions {
   skip?: (meshName: string) => boolean;
   withTextures?: boolean;
   onProgress?: (msg: string) => void;
+  /** Optional pre-baked terrain splatmap (tools/l2-bake-terrain.mjs) → one ground texture. */
+  bakedTerrain?: (mapX: number, mapY: number) => Promise<THREE.Texture | null>;
 }
 
 const DEFAULT_SKIP = (n: string) => /sky|cloud|backdrop/i.test(n);
@@ -255,6 +257,24 @@ export async function loadMap(
     const built = heightmap ? buildTerrainGeometry(terrain, heightmap) : null;
     if (!built) continue;
     const { geometry, width } = built;
+
+    // Preferred: a pre-baked splatmap (one texture, reliable + fast). Falls back to the
+    // runtime per-layer blend if no bake exists for this tile.
+    const baked = opts.bakedTerrain ? await opts.bakedTerrain(terrain.mapX, terrain.mapY) : null;
+    if (baked) {
+      baked.colorSpace = THREE.SRGBColorSpace;
+      baked.flipY = false;
+      baked.wrapS = baked.wrapT = THREE.ClampToEdgeWrapping;
+      baked.anisotropy = 8;
+      baked.needsUpdate = true;
+      const m = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ map: baked, roughness: 1, metalness: 0 }));
+      m.name = `Terrain:${terrain.mapX}_${terrain.mapY}:baked`;
+      m.receiveShadow = true;
+      l2Group.add(m);
+      terrainMeshes++;
+      terrainLayered++;
+      continue;
+    }
 
     // One mesh per terrain layer: layer 0 = opaque base, the rest blended by their alpha mask.
     const tile = Math.max(2, Math.round((width - 1) / 8)); // ground-texture tiling across the tile
