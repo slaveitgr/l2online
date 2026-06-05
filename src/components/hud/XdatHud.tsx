@@ -334,10 +334,12 @@ function SkillsPanel({ skills, onClose }: { skills: SkillEntry[]; onClose: () =>
   );
 }
 
-export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendChat }: XdatHudProps) {
+export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendChat, packetCount }: XdatHudProps) {
   const [chatText, setChatText] = useState("");
   const [openWindows, setOpenWindows] = useState<XdatWindowKey[]>([]);
   const [exitOpen, setExitOpen] = useState(false);
+  const [devMode, setDevMode] = useState(false);
+
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   // live state driven by the protocol layer
   const [live, setLive] = useState<Partial<PlayerState>>({});
