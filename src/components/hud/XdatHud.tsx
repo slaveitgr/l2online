@@ -12,7 +12,7 @@
  *
  *   <SpriteProvider><XdatHud activeChar={char} onExit={...} onSendChat={...}/></SpriteProvider>
  */
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type MouseEvent as ReactMouseEvent, type FormEvent } from "react";
 import { useSprites } from "@/components/hud/L2Sprite";
 import { getGameConnection, type GameEvent, type PlayerState, type SkillEntry } from "@/lib/l2-protocol/game-client";
 import { L2XdatWindow, type XdatWindowKey } from "@/components/hud/L2XdatWindow";
@@ -212,7 +212,7 @@ function L2HtmlWindow({ html, title, onBypass, onClose }: { html: string; title:
     const t = (e.target as HTMLElement).closest?.(".l2bypass") as HTMLElement | null;
     if (t?.dataset.cmd) { e.preventDefault(); onBypass(subst(t.dataset.cmd)); }
   };
-  const onInput = (e: React.FormEvent<HTMLDivElement>) => {
+  const onInput = (e: FormEvent<HTMLDivElement>) => {
     const el = e.target as HTMLInputElement;
     if (el.classList?.contains("l2edit") && el.dataset.var) editVals.current[el.dataset.var] = el.value;
   };
