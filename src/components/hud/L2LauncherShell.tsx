@@ -1,16 +1,13 @@
 /**
  * L2LauncherShell — shared chrome for the pre-game screens (login + server
- * select). Renders the looping login video as background (with a mute/unmute
- * toggle so the soundtrack can play), a row of vertical side links on the
- * right (New Account / Lost Account / Links / Settings / CDN Cache), an
- * "Update" button that flushes the CDN cache + service worker and reloads,
- * and a bottom branding bar. Children render centered on top.
+ * select). Renders the looping login video as background, side links, brand
+ * bar, mute toggle, update button, and an optional Logs button (opens a modal
+ * with the L2 protocol log so the screen stays clean).
  */
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 const CLIENT_VIDEO = "/hud/videos/login_web.mp4";
-const CLIENT_POSTER = "/hud/screens/LogonScreen.png";
 
 const SIDE_LINKS: { label: string; href?: string; to?: string }[] = [
   { label: "New Account", href: "https://www.slave.gr/register" },
@@ -98,56 +95,12 @@ function BrandBar() {
         fontSize: 12,
       }}
     >
-      <span
-        style={{
-          fontWeight: 800,
-          letterSpacing: 0,
-          color: "#fff",
-          background: "#000",
-          padding: "1px 6px",
-          borderRadius: 2,
-          border: "1px solid #555",
-        }}
-      >
-        nc
-      </span>
+      <span style={{ fontWeight: 800, color: "#fff", background: "#000", padding: "1px 6px", borderRadius: 2, border: "1px solid #555" }}>nc</span>
       <span style={{ opacity: 0.5 }}>|</span>
-      <span
-        style={{
-          fontFamily: "Cinzel, 'Trajan Pro', Georgia, serif",
-          letterSpacing: 0,
-          color: "#e6dcb6",
-          fontSize: 14,
-          fontWeight: 600,
-        }}
-      >
-        LINEAGE&nbsp;II
-      </span>
+      <span style={{ fontFamily: "Cinzel, 'Trajan Pro', Georgia, serif", color: "#e6dcb6", fontSize: 14, fontWeight: 600 }}>LINEAGE&nbsp;II</span>
       <span style={{ opacity: 0.5 }}>|</span>
-      <span style={{ color: "#e6dcb6" }}>
-        <span
-          style={{
-            display: "inline-block",
-            marginRight: 4,
-            width: 14,
-            height: 14,
-            borderRadius: 14,
-            background: "#3a7be0",
-            color: "#fff",
-            textAlign: "center",
-            lineHeight: "14px",
-            fontWeight: 800,
-            fontSize: 10,
-            verticalAlign: "middle",
-          }}
-        >
-          *
-        </span>
-        slave.gr
-      </span>
-      <span style={{ opacity: 0.55 }}>
-        © Slave.gr · Powered by NCSOFT Lineage II. All Rights Reserved.
-      </span>
+      <span style={{ color: "#e6dcb6" }}>slave.gr</span>
+      <span style={{ opacity: 0.55 }}>© Slave.gr · Powered by NCSOFT Lineage II.</span>
     </div>
   );
 }
@@ -158,7 +111,6 @@ function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void 
       type="button"
       onClick={onToggle}
       title={muted ? "Unmute" : "Mute"}
-      aria-label={muted ? "Unmute soundtrack" : "Mute soundtrack"}
       style={{
         position: "absolute",
         left: 16,
@@ -167,8 +119,7 @@ function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void 
         width: 34,
         height: 34,
         borderRadius: "50%",
-        background:
-          "linear-gradient(180deg,#3a3424 0%,#1f1a10 55%,#2a2418 100%)",
+        background: "linear-gradient(180deg,#3a3424 0%,#1f1a10 55%,#2a2418 100%)",
         border: "1px solid #6a5630",
         boxShadow: "inset 0 1px 0 rgba(255,235,180,0.10), 0 2px 6px rgba(0,0,0,0.7)",
         color: "#e6dcb6",
@@ -182,6 +133,124 @@ function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void 
     >
       {muted ? "off" : "on"}
     </button>
+  );
+}
+
+function LogsButton({ count, onOpen }: { count: number; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title="Show connection log"
+      style={{
+        position: "absolute",
+        left: 60,
+        bottom: 32,
+        zIndex: 5,
+        height: 28,
+        padding: "0 12px",
+        borderRadius: 4,
+        background: "linear-gradient(180deg,#3a3424 0%,#1f1a10 55%,#2a2418 100%)",
+        border: "1px solid #6a5630",
+        boxShadow: "inset 0 1px 0 rgba(255,235,180,0.10), 0 2px 6px rgba(0,0,0,0.7)",
+        color: "#e6dcb6",
+        fontFamily: "Arial, Helvetica, sans-serif",
+        fontSize: 12,
+        cursor: "pointer",
+        textShadow: "0 1px 2px #000",
+        letterSpacing: 0.5,
+      }}
+    >
+      Logs{count ? ` (${count})` : ""}
+    </button>
+  );
+}
+
+function LogsModal({ lines, onClose }: { lines: string[]; onClose: () => void }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [lines]);
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 50,
+        background: "rgba(0,0,0,0.65)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        pointerEvents: "auto",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(720px, 92vw)",
+          maxHeight: "80vh",
+          background: "linear-gradient(180deg,#1a1612 0%,#0c0a07 100%)",
+          border: "1px solid #6a5630",
+          boxShadow: "0 12px 40px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,235,180,0.06)",
+          color: "#cfc6a4",
+          fontFamily: "Arial, Helvetica, sans-serif",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "8px 12px",
+            background: "linear-gradient(180deg,#3a3424,#1f1a10)",
+            borderBottom: "1px solid #6a5630",
+          }}
+        >
+          <span style={{ fontSize: 13, color: "#e6dcb6", textShadow: "0 1px 2px #000" }}>Connection Log</span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: 22,
+              height: 22,
+              background: "transparent",
+              border: "1px solid #6a5630",
+              color: "#e6dcb6",
+              cursor: "pointer",
+              fontSize: 14,
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+        <div
+          ref={scrollRef}
+          style={{
+            padding: "10px 12px",
+            overflowY: "auto",
+            fontSize: 12,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            lineHeight: 1.55,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {lines.length === 0 ? (
+            <div style={{ opacity: 0.6 }}>No log entries yet.</div>
+          ) : (
+            lines.map((line, i) => (
+              <div key={i} style={{ color: "#cfc6a4" }}>{line}</div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -206,26 +275,18 @@ async function flushAndReload() {
   if (typeof window !== "undefined") window.location.reload();
 }
 
-export function L2LauncherShell({ children }: { children: ReactNode }) {
+export function L2LauncherShell({ children, logs }: { children: ReactNode; logs?: string[] }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(true);
   const [updating, setUpdating] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
 
-  // try to unmute as soon as the user interacts anywhere on the shell
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
     v.muted = muted;
-    if (!muted) {
-      v.play().catch(() => {
-        /* autoplay-with-sound may be blocked until interaction */
-      });
-    }
+    if (!muted) v.play().catch(() => undefined);
   }, [muted]);
-
-  function toggleMute() {
-    setMuted((m) => !m);
-  }
 
   async function onUpdate() {
     if (updating) return;
@@ -247,7 +308,6 @@ export function L2LauncherShell({ children }: { children: ReactNode }) {
       <video
         ref={videoRef}
         src={CLIENT_VIDEO}
-        poster={CLIENT_POSTER}
         autoPlay
         muted={muted}
         loop
@@ -266,15 +326,16 @@ export function L2LauncherShell({ children }: { children: ReactNode }) {
         style={{
           position: "absolute",
           inset: 0,
-          background:
-            "radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.35) 100%)",
+          background: "radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.35) 100%)",
           pointerEvents: "none",
         }}
       />
       <div style={{ position: "absolute", inset: 0, zIndex: 3 }}>{children}</div>
-      <MuteToggle muted={muted} onToggle={toggleMute} />
+      <MuteToggle muted={muted} onToggle={() => setMuted((m) => !m)} />
+      {logs ? <LogsButton count={logs.length} onOpen={() => setLogsOpen(true)} /> : null}
       <SideLinks onUpdate={onUpdate} updating={updating} />
       <BrandBar />
+      {logsOpen && logs ? <LogsModal lines={logs} onClose={() => setLogsOpen(false)} /> : null}
     </div>
   );
 }
