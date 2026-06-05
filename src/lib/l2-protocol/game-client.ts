@@ -940,8 +940,10 @@ export class L2GameClient {
   }
 
   /**
-   * RequestBypassToServer (0x23): send an HTML-link bypass or an admin command.
-   * The L2 client maps a typed "//cmd args" to the bypass "admin_cmd args".
+   * RequestBypassToServer (0x23): for clicks on links inside a server-sent HTML
+   * (e.g. <a action="bypass admin_x">). The server validates these against the
+   * HTML it last sent, so the command MUST be one it issued. Use this ONLY for
+   * HTML-link clicks, never for typed commands.
    */
   sendBypass(command: string) {
     if (!this.connected || !command) return;
@@ -949,11 +951,23 @@ export class L2GameClient {
     this.sendFrame(body, this.useEncryption);
   }
 
-  /** Convenience: send a chat line OR route "//x" admin commands as bypass. */
+  /**
+   * SendBypassBuildCmd (0x74): the channel the real client uses for TYPED GM
+   * commands ("//cmd"). Send the command WITHOUT the "admin_" prefix — the
+   * server prepends it (useAdminCommand "admin_" + cmd). No HTML validation,
+   * so this is what actually opens //admin etc.
+   */
+  sendBuildCmd(command: string) {
+    if (!this.connected || !command) return;
+    const body = new PacketWriter().u8(0x74).str(command).build();
+    this.sendFrame(body, this.useEncryption);
+  }
+
+  /** Convenience: send a chat line OR route a typed "//x" GM command. */
   sendChatOrCommand(text: string, channel = 0) {
-    if (!text) return;
+    if (!text) return false;
     if (text.startsWith("//")) {
-      this.sendBypass("admin_" + text.slice(2));
+      this.sendBuildCmd(text.slice(2)); // 0x74, server adds "admin_"
       return true; // handled as admin command
     }
     this.sendSay(text, channel);

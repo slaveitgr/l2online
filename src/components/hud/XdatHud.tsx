@@ -12,7 +12,7 @@
  *
  *   <SpriteProvider><XdatHud activeChar={char} onExit={...} onSendChat={...}/></SpriteProvider>
  */
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type MouseEvent as ReactMouseEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
 import { useSprites } from "@/components/hud/L2Sprite";
 import { getGameConnection, type GameEvent, type PlayerState, type SkillEntry } from "@/lib/l2-protocol/game-client";
 import { L2XdatWindow, type XdatWindowKey } from "@/components/hud/L2XdatWindow";
@@ -179,31 +179,58 @@ function L2HtmlWindow({ html, title, onBypass, onClose }: { html: string; title:
     (html.match(/<center>\s*(?:<font[^>]*>)?\s*([^<>]{3,40}?)\s*(?:<\/font>)?\s*<br/i) || [])[1] ??
     title;
 
+  const attr = (a: string, n: string) => (a.match(new RegExp(n + '\\s*=\\s*"?([^"\\s>]+)"?', "i")) || [])[1];
+  const num = (v: string | undefined, d: number, max: number) => Math.min(v ? parseInt(v) || d : d, max);
+
   const safe = html
     .replace(/<\s*script[\s\S]*?<\s*\/\s*script>/gi, "")
-    .replace(/<\s*(img|imgsrc)[^>]*>/gi, "")
+    .replace(/<\s*head[\s\S]*?<\s*\/\s*head>/gi, "")
     .replace(/on\w+\s*=\s*"[^"]*"/gi, "")
     .replace(/<br1\s*\/?>/gi, "<br>")
-    // <button ... value="LABEL" ... action="bypass [-h] CMD" ...>  (attrs any order)
-    .replace(/<button\b([^>]*)>/gi, (_m, attrs: string) => {
-      const val = (attrs.match(/value\s*=\s*"([^"]*)"/i) || [])[1] ?? "";
-      const act = (attrs.match(/action\s*=\s*"bypass(?:\s+-h)?\s+([^"]*)"/i) || [])[1];
-      if (!act) return `<span class="l2btn">${val}</span>`;
-      return `<button type="button" class="l2btn l2bypass" data-cmd="${act.replace(/"/g, "&quot;").trim()}">${val}</button>`;
+    // <fstring id=NN> — client NPC-string table, not resolvable here: drop.
+    .replace(/<fstring[^>]*>(?:[\s\S]*?<\/fstring>)?/gi, "")
+    // <button value="LABEL" action="bypass [-h] CMD" width= height=>
+    .replace(/<button\b([^>]*)>/gi, (_m, a: string) => {
+      const val = (a.match(/value\s*=\s*"([^"]*)"/i) || [])[1] ?? "";
+      const act = (a.match(/action\s*=\s*"bypass(?:\s+-h)?\s+([^"]*)"/i) || [])[1];
+      const w = attr(a, "width"); const wsty = w ? `width:${num(w, 0, 300)}px;` : "width:100%;";
+      if (!act) return `<span class="l2btn" style="${wsty}">${val}</span>`;
+      return `<button type="button" class="l2btn l2bypass" style="${wsty}" data-cmd="${act.replace(/"/g, "&quot;").trim()}">${val}</button>`;
     })
     .replace(/<\/button>/gi, "")
+    // <multiedit var="V" width= height=>  (multi-line)
+    .replace(/<multiedit\b([^>]*)\/?>(?:\s*<\/multiedit>)?/gi, (_m, a: string) => {
+      const v = attr(a, "var") ?? "val";
+      const w = num(attr(a, "width"), 200, 320), h = num(attr(a, "height"), 40, 200);
+      return `<textarea class="l2edit l2multiedit" data-var="${v}" style="width:${w}px;height:${h}px"></textarea>`;
+    })
     // <edit var="V" width=N>
-    .replace(/<edit\b([^>]*)\/?>/gi, (_m, attrs: string) => {
-      const v = (attrs.match(/var\s*=\s*"([^"]*)"/i) || [])[1] ?? "val";
-      const w = (attrs.match(/width\s*=\s*"?(\d+)"?/i) || [])[1] ?? "120";
-      return `<input class="l2edit" data-var="${v}" style="width:${Math.min(+w, 260)}px" />`;
+    .replace(/<edit\b([^>]*)\/?>/gi, (_m, a: string) => {
+      const v = attr(a, "var") ?? "val";
+      const w = num(attr(a, "width"), 120, 280);
+      return `<input class="l2edit" data-var="${v}" style="width:${w}px" />`;
+    })
+    // <combobox var="V" width= list="a;b;c">
+    .replace(/<combobox\b([^>]*)\/?>(?:\s*<\/combobox>)?/gi, (_m, a: string) => {
+      const v = attr(a, "var") ?? "val";
+      const w = num(attr(a, "width"), 120, 280);
+      const list = ((a.match(/list\s*=\s*"([^"]*)"/i) || [])[1] ?? "").split(";").filter(Boolean);
+      const opts = list.map((o) => `<option value="${o.replace(/"/g, "&quot;")}">${o}</option>`).join("");
+      return `<select class="l2edit l2combo" data-var="${v}" style="width:${w}px">${opts}</select>`;
+    })
+    // <img src="ref" width= height=> — sized placeholder (client textures aren't web-loadable by name)
+    .replace(/<img\b([^>]*)\/?>/gi, (_m, a: string) => {
+      const w = num(attr(a, "width"), 16, 64), h = num(attr(a, "height"), 16, 64);
+      return `<span class="l2img" style="width:${w}px;height:${h}px"></span>`;
     })
     // <a action="bypass [-h] CMD">label</a>
     .replace(/<a\b[^>]*action\s*=\s*"bypass(?:\s+-h)?\s+([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi,
       (_m, cmd: string, label: string) => `<span class="l2bypass" data-cmd="${cmd.replace(/"/g, "&quot;").trim()}">${label}</span>`)
-    .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1");
+    .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1")
+    // FIXWIDTH=NN (L2-only) → CSS width on the element it sits on
+    .replace(/fixwidth\s*=\s*"?(\d+)"?/gi, (_m, n: string) => `style="width:${n}px"`);
 
-  // substitute $var / %var% in a command with current edit-box values
+  // substitute $var / %var% in a command with current widget values
   const subst = (cmd: string) =>
     cmd.replace(/\$(\w+)/g, (_m, k) => editVals.current[k] ?? "")
        .replace(/%(\w+)%/g, (_m, k) => editVals.current[k] ?? "");
@@ -212,9 +239,9 @@ function L2HtmlWindow({ html, title, onBypass, onClose }: { html: string; title:
     const t = (e.target as HTMLElement).closest?.(".l2bypass") as HTMLElement | null;
     if (t?.dataset.cmd) { e.preventDefault(); onBypass(subst(t.dataset.cmd)); }
   };
-  const onInput = (e: FormEvent<HTMLDivElement>) => {
+  const capture = (e: { target: EventTarget | null }) => {
     const el = e.target as HTMLInputElement;
-    if (el.classList?.contains("l2edit") && el.dataset.var) editVals.current[el.dataset.var] = el.value;
+    if (el?.classList?.contains("l2edit") && el.dataset.var) editVals.current[el.dataset.var] = el.value;
   };
 
   return (
@@ -226,7 +253,7 @@ function L2HtmlWindow({ html, title, onBypass, onClose }: { html: string; title:
         <span style={{ fontSize: 12, fontWeight: 700, color: "#e9dfbf" }}>{winTitle}</span>
         <button onClick={onClose} style={{ width: 16, height: 16, fontSize: 10, color: "#cbbf9c", background: "transparent", border: "1px solid #5a4a2a", borderRadius: 2, cursor: "pointer" }}>×</button>
       </div>
-      <div onClick={onClick} onInput={onInput} className="l2html"
+      <div onClick={onClick} onInput={capture} onChange={capture} className="l2html"
         style={{ overflowY: "auto", padding: 10, fontSize: 12, lineHeight: 1.5, color: "#ccbf94" }}
         dangerouslySetInnerHTML={{ __html: safe }} />
       <style>{`
@@ -236,13 +263,16 @@ function L2HtmlWindow({ html, title, onBypass, onClose }: { html: string; title:
         .l2html table{width:100%;border-collapse:collapse}
         .l2html td{padding:2px 3px;vertical-align:middle}
         .l2html a,.l2html .l2bypass:not(.l2btn){color:#7fb6ff;cursor:pointer;text-decoration:underline}
-        .l2html .l2btn{display:inline-block;width:100%;min-width:62px;padding:3px 6px;margin:1px 0;text-align:center;
+        .l2html .l2btn{display:inline-block;min-width:48px;padding:3px 6px;margin:1px 0;text-align:center;box-sizing:border-box;
           font-size:11px;color:#e7dcba;cursor:pointer;border:1px solid #6b5a30;border-radius:2px;
           background:linear-gradient(180deg,#4a4230,#2a2418);text-shadow:0 1px 1px #000}
         .l2html .l2btn:hover{background:linear-gradient(180deg,#5e5238,#352d1c);color:#fff0c8}
         .l2html .l2btn:active{background:#241f14}
-        .l2html .l2edit{height:18px;padding:0 5px;font-size:11px;color:#f3ecd2;
-          background:#0c0f14;border:1px solid #4a4030;border-radius:2px;outline:none}
+        .l2html .l2edit{height:18px;padding:0 5px;font-size:11px;color:#f3ecd2;box-sizing:border-box;
+          background:#0c0f14;border:1px solid #4a4030;border-radius:2px;outline:none;vertical-align:middle}
+        .l2html textarea.l2edit{height:auto;padding:3px 5px;resize:none;font-family:Tahoma,sans-serif}
+        .l2html select.l2edit{height:20px}
+        .l2html .l2img{display:inline-block;background:rgba(120,110,80,.25);border:1px solid #4a4030;border-radius:2px;vertical-align:middle}
       `}</style>
     </div>
   );
@@ -300,15 +330,16 @@ export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendCh
   const closeWindow = (k: XdatWindowKey) => setOpenWindows((ws) => ws.filter((w) => w !== k));
   const runItem = (m: MenuItem) => { if (m.action === "exit") setExitOpen(true); else if (m.win) toggleWindow(m.win); };
 
-  // Send a bypass / admin command to the server (server replies with NpcHtml).
+  // HTML-link clicks inside a server dialog: validated bypass (0x23, full "admin_x").
   const bypass = (cmd: string) => getGameConnection()?.sendBypass?.(cmd);
 
-  // Chat submit: "//x" → GM/admin command (bypass admin_x); otherwise normal say.
+  // Chat submit: typed "//x" → GM command via SendBypassBuildCmd (0x74, no prefix);
+  // otherwise a normal chat line.
   const submitChat = () => {
     const text = chatText.trim();
     if (!text) return;
     if (text.startsWith("//")) {
-      bypass("admin_" + text.slice(2));
+      getGameConnection()?.sendBuildCmd?.(text.slice(2));
       setFeed((c) => [...c.slice(-200), { color: "#caa86a", text: `» ${text}` }]);
     } else {
       onSendChat?.(text);
