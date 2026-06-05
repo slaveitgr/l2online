@@ -5,6 +5,14 @@ import { L2GameClient, setGameConnection, type GameEvent } from "@/lib/l2-protoc
 import { SpriteProvider } from "@/components/hud/L2Sprite";
 import { L2LoginScreen } from "@/components/hud/L2LoginScreen";
 import { L2LauncherShell } from "@/components/hud/L2LauncherShell";
+import {
+  readSsoTokenFromUrl,
+  stripSsoFromUrl,
+  verifySsoToken,
+  saveSsoSession,
+  loadSsoSession,
+  clearSsoSession,
+} from "@/lib/l2-protocol/sso";
 
 const GAME_PROTOCOL = 502;
 
@@ -20,6 +28,7 @@ export const Route = createFileRoute("/")({
 });
 
 type Phase = "login" | "server-select";
+type SsoPhase = "checking" | "ready" | "failed";
 
 function Launcher() {
   const navigate = useNavigate();
@@ -30,7 +39,12 @@ function Launcher() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusLog, setStatusLog] = useState<string[]>([]);
+  // SSR-safe initial state: always "ready", then upgrade to "checking" inside
+  // the effect once we know we are on the client and have a token/session.
+  const [ssoPhase, setSsoPhase] = useState<SsoPhase>("ready");
   const loginRef = useRef<L2LoginClient | null>(null);
+  const autoEnterRef = useRef(false);
+  const ssoRanRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -52,6 +66,47 @@ function Launcher() {
       return next;
     });
   }
+
+  // SSO auto-login: ?sso=<token> OR stored l2.session in localStorage.
+  // Runs once on mount, client-only.
+  useEffect(() => {
+    if (ssoRanRef.current) return;
+    ssoRanRef.current = true;
+
+    const urlToken = readSsoTokenFromUrl();
+    const stored = loadSsoSession();
+
+    if (!urlToken && !stored) return;
+
+    setSsoPhase("checking");
+
+    (async () => {
+      if (urlToken) {
+        // single-use: strip immediately so refresh / share doesn't reuse it
+        stripSsoFromUrl();
+        const res = await verifySsoToken(urlToken);
+        if (!res.ok) {
+          clearSsoSession();
+          setError("SSO session expired, login manually.");
+          setSsoPhase("failed");
+          return;
+        }
+        saveSsoSession({
+          login: res.login,
+          sessionToken: res.sessionToken,
+          expiresAt: res.expiresAt,
+        });
+        autoEnterRef.current = true;
+        await doLogin(res.login, res.sessionToken);
+      } else if (stored) {
+        autoEnterRef.current = true;
+        await doLogin(stored.login, stored.sessionToken);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
 
   async function doLogin(id: string, pw: string) {
     setUsername(id);
@@ -104,6 +159,10 @@ function Launcher() {
     setServers([]);
     setSelectedServer(null);
     setPhase("login");
+    // user explicitly bailed — don't auto-login again with the stored token
+    clearSsoSession();
+    autoEnterRef.current = false;
+    setSsoPhase("ready");
   }
 
   async function onEnterWorld() {
@@ -161,6 +220,51 @@ function Launcher() {
     } finally {
       setBusy(false);
     }
+  }
+
+  // After auto-login (SSO or stored session), enter the world automatically
+  // once the server list arrives — user never sees server-select.
+  useEffect(() => {
+    if (!autoEnterRef.current) return;
+    if (phase !== "server-select") return;
+    if (selectedServer == null) return;
+    if (busy) return;
+    autoEnterRef.current = false;
+    void onEnterWorld();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, selectedServer, busy]);
+
+  // If auto-login fails, fall back to the manual login screen.
+  useEffect(() => {
+    if (ssoPhase === "checking" && error && !busy && phase === "login") {
+      clearSsoSession();
+      autoEnterRef.current = false;
+      setSsoPhase("failed");
+    }
+  }, [ssoPhase, error, busy, phase]);
+
+  if (ssoPhase === "checking") {
+    return (
+      <SpriteProvider>
+        <L2LauncherShell logs={statusLog}>
+          <div
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: "55%",
+              transform: "translate(-50%, -50%)",
+              color: "#e6dcb6",
+              fontFamily: "Arial, Helvetica, sans-serif",
+              fontSize: 13,
+              textShadow: "0 1px 2px #000, 0 0 4px #000",
+              pointerEvents: "none",
+            }}
+          >
+            Signing in…
+          </div>
+        </L2LauncherShell>
+      </SpriteProvider>
+    );
   }
 
   return (
