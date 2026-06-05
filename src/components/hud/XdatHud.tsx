@@ -588,12 +588,42 @@ export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendCh
       {openWindows.map((k) =>
         k === "skills" ? (
           <SkillsPanel key={k} skills={skills} onClose={() => closeWindow(k)} />
-        ) : (
+        ) : devMode ? (
           <div key={k} style={{ pointerEvents: "auto" }}>
             <L2XdatWindow windowKey={k} onClose={() => closeWindow(k)} />
           </div>
-        )
+        ) : null
       )}
+
+      {/* ───── DEV toggle (tiny, top-right corner) ───── */}
+      <div style={{ position: "absolute", top: 4, right: 4, pointerEvents: "auto", display: "flex", gap: 4, alignItems: "center" }}>
+        {devMode && (
+          <span style={{ fontSize: 9, fontFamily: "ui-monospace, Menlo, monospace", color: "#8a7f5f", textShadow: "0 1px 1px #000" }}>
+            pkts {packetCount ?? 0}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => setDevMode((v) => !v)}
+          title="Toggle developer overlays (xdat skeletons)"
+          style={{
+            fontSize: 9,
+            fontWeight: 700,
+            letterSpacing: 1,
+            padding: "2px 6px",
+            color: devMode ? "#ffd97a" : "#7a6f4f",
+            background: devMode ? "linear-gradient(180deg,#3a3018,#1a1408)" : "rgba(0,0,0,0.35)",
+            border: `1px solid ${devMode ? "#6a5a2a" : "#3a3024"}`,
+            borderRadius: 2,
+            cursor: "pointer",
+            textShadow: "0 1px 1px #000",
+          }}
+        >
+          DEV
+        </button>
+      </div>
+
+
 
       {/* ───── Server HTML window (NPC dialogs + GM/admin panel) ───── */}
       {htmlWnd && (
