@@ -67,6 +67,47 @@ function Launcher() {
     });
   }
 
+  // SSO auto-login: ?sso=<token> OR stored l2.session in localStorage.
+  // Runs once on mount, client-only.
+  useEffect(() => {
+    if (ssoRanRef.current) return;
+    ssoRanRef.current = true;
+
+    const urlToken = readSsoTokenFromUrl();
+    const stored = loadSsoSession();
+
+    if (!urlToken && !stored) return;
+
+    setSsoPhase("checking");
+
+    (async () => {
+      if (urlToken) {
+        // single-use: strip immediately so refresh / share doesn't reuse it
+        stripSsoFromUrl();
+        const res = await verifySsoToken(urlToken);
+        if (!res.ok) {
+          clearSsoSession();
+          setError("SSO session expired, login manually.");
+          setSsoPhase("failed");
+          return;
+        }
+        saveSsoSession({
+          login: res.login,
+          sessionToken: res.sessionToken,
+          expiresAt: res.expiresAt,
+        });
+        autoEnterRef.current = true;
+        await doLogin(res.login, res.sessionToken);
+      } else if (stored) {
+        autoEnterRef.current = true;
+        await doLogin(stored.login, stored.sessionToken);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+
   async function doLogin(id: string, pw: string) {
     setUsername(id);
     setError(null);
