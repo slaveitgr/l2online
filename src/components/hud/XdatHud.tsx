@@ -58,9 +58,7 @@ interface XdatHudProps {
   chatLines?: HudChatLine[];
   onExit?: () => void;
   onSendChat?: (text: string) => void;
-  packetCount?: number;
 }
-
 
 const GAUGE = "/hud/gauges"; // CP/HP/MP/EXP _bg.png + _fill.png (256x16)
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
@@ -68,14 +66,22 @@ const ratio = (cur = 0, max = 0) => (max > 0 ? clamp01(cur / max) : 0);
 const expRatio = (v = 0) => clamp01(v > 1 ? v / 100 : v);
 const fmt = (n = 0) => Math.round(n).toLocaleString("en-US");
 
-/** A single L2 status gauge: bg sprite + width-clipped fill sprite + centred text. */
+const TAG_COLOR: Record<string, string> = { CP: "#f1d873", HP: "#e98c7a", MP: "#7ea8e6", VP: "#b9b9b9", EXP: "#cdb155" };
+
+/** A single L2 status gauge: bg sprite + width-clipped fill sprite + optional left tag + centred value. */
 function Gauge({
-  kind, cur, max, w, h = 12, label, showText = true,
-}: { kind: "CP" | "HP" | "MP" | "EXP"; cur?: number; max?: number; w: number; h?: number; label?: string; showText?: boolean }) {
+  kind, cur, max, w, h = 12, label, showText = true, tag,
+}: { kind: "CP" | "HP" | "MP" | "EXP" | "VP"; cur?: number; max?: number; w: number; h?: number; label?: string; showText?: boolean; tag?: string }) {
   const r = kind === "EXP" ? expRatio(cur) : ratio(cur, max);
+  const isVp = kind === "VP"; // no VP sprite — render an empty dark bar
   return (
-    <div style={{ position: "relative", width: w, height: h, backgroundImage: `url(${GAUGE}/${kind}_bg.png)`, backgroundSize: "100% 100%", overflow: "hidden" }}>
-      <div style={{ position: "absolute", inset: 0, width: `${r * 100}%`, backgroundImage: `url(${GAUGE}/${kind}_fill.png)`, backgroundSize: `${w}px 100%`, backgroundRepeat: "no-repeat" }} />
+    <div style={{ position: "relative", width: w, height: h, overflow: "hidden",
+      backgroundImage: isVp ? undefined : `url(${GAUGE}/${kind}_bg.png)`, backgroundSize: "100% 100%",
+      background: isVp ? "linear-gradient(180deg,#1a1a1a,#0e0e0e)" : undefined, border: isVp ? "1px solid #2c2c2c" : undefined, boxSizing: "border-box" }}>
+      {!isVp && <div style={{ position: "absolute", inset: 0, width: `${r * 100}%`, backgroundImage: `url(${GAUGE}/${kind}_fill.png)`, backgroundSize: `${w}px 100%`, backgroundRepeat: "no-repeat" }} />}
+      {tag && (
+        <span style={{ position: "absolute", left: 4, top: 0, bottom: 0, display: "flex", alignItems: "center", fontSize: Math.max(8, h - 3), fontWeight: 700, color: TAG_COLOR[kind] ?? "#e7dcba", textShadow: "0 1px 1px #000", pointerEvents: "none" }}>{tag}</span>
+      )}
       {showText && (
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Tahoma, sans-serif", fontSize: Math.max(8, h - 4), lineHeight: 1, color: "#f3ecd2", textShadow: "0 1px 1px #000, 0 0 2px #000", whiteSpace: "nowrap", pointerEvents: "none" }}>
           {label ?? (kind === "EXP" ? `${(expRatio(cur) * 100).toFixed(2)}%` : `${fmt(cur)} / ${fmt(max)}`)}
@@ -96,25 +102,30 @@ function Spr({ refId, w, h, style, children }: { refId: string; w?: number; h?: 
   );
 }
 
-// Menu entries -> the xdat window each opens (+ optional hotkey).
-type MenuItem = { label: string; title: string; win?: XdatWindowKey; key?: string; action?: "exit" };
+// Menu entries -> the xdat window each opens (+ optional hotkey + real icon sprite).
+type MenuItem = { label: string; title: string; win?: XdatWindowKey; key?: string; action?: "exit"; icon?: string };
+const ICON = "/hud/sidebar"; // sliced real client icons
 const RIGHT_MENU: MenuItem[] = [
-  { label: "INV", title: "Inventory", win: "equipment", key: "i" },
-  { label: "ACT", title: "Actions", win: "actions" },
-  { label: "SKL", title: "Skills", win: "skills", key: "k" },
-  { label: "QST", title: "Quest", win: "quest", key: "j" },
-  { label: "CHR", title: "Character", win: "character", key: "t" },
-  { label: "CLN", title: "Clan", win: "clan" },
-  { label: "MAP", title: "Map", win: "map", key: "m" },
-  { label: "SYS", title: "System / Exit", action: "exit" },
+  { label: "ACT", title: "Actions", win: "actions", icon: `${ICON}/side_00.png` },
+  { label: "CHR", title: "Character", win: "character", key: "t", icon: `${ICON}/side_02.png` },
+  { label: "INV", title: "Inventory", win: "equipment", key: "i", icon: `${ICON}/side_09.png` },
+  { label: "SKL", title: "Skills", win: "skills", key: "k", icon: `${ICON}/side_04.png` },
+  { label: "QST", title: "Quest", win: "quest", key: "j", icon: `${ICON}/side_10.png` },
+  { label: "CLN", title: "Clan", win: "clan", icon: `${ICON}/side_05.png` },
+  { label: "MAP", title: "Map", win: "map", key: "m", icon: `${ICON}/side_01.png` },
+  { label: "STR", title: "Store", win: "store", icon: `${ICON}/side_11.png` },
+  { label: "OLY", title: "Olympiad", win: "olympiad", icon: `${ICON}/side_06.png` },
+  { label: "SYS", title: "System / Exit", action: "exit", icon: `${ICON}/side_12.png` },
 ];
 const BOTTOM_MENU: MenuItem[] = [
-  { label: "INV", title: "Inventory", win: "equipment", key: "i" },
-  { label: "SKL", title: "Skills", win: "skills", key: "k" },
-  { label: "QST", title: "Quest", win: "quest" },
-  { label: "MAP", title: "Map", win: "map" },
-  { label: "STR", title: "Store", win: "store" },
-  { label: "SYS", title: "Exit", action: "exit" },
+  { label: "INV", title: "Inventory", win: "equipment", key: "i", icon: `${ICON}/bot_00.png` },
+  { label: "CHR", title: "Character", win: "character", icon: `${ICON}/bot_01.png` },
+  { label: "SKL", title: "Skills", win: "skills", key: "k", icon: `${ICON}/bot_02.png` },
+  { label: "QST", title: "Quest", win: "quest", icon: `${ICON}/bot_03.png` },
+  { label: "MAP", title: "Map", win: "map", icon: `${ICON}/bot_04.png` },
+  { label: "CLN", title: "Clan", win: "clan", icon: `${ICON}/bot_06.png` },
+  { label: "STR", title: "Store", win: "store", icon: `${ICON}/bot_07.png` },
+  { label: "SYS", title: "Exit", action: "exit", icon: `${ICON}/bot_09.png` },
 ];
 
 /** Live minimap: player centred, NPCs/players as dots, scaled from world coords. */
@@ -175,10 +186,6 @@ function Minimap({ size = 168, name }: { size?: number; name: string }) {
  */
 function L2HtmlWindow({ html, title, onBypass, onClose }: { html: string; title: string; onBypass: (cmd: string) => void; onClose: () => void }) {
   const editVals = useRef<Record<string, string>>({});
-  const reg = useSprites();
-  const btnUrl = reg?.url("L2UI_CT1.Button_DF_Click") ?? null;
-  const btnOverUrl = reg?.url("L2UI_CT1.Button_DF_Over") ?? null;
-  const frameUrl = reg?.url("L2UI_CT1.GroupBox_DF") ?? null;
 
   // draggable window
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: 292, y: 70 });
@@ -260,42 +267,38 @@ function L2HtmlWindow({ html, title, onBypass, onClose }: { html: string; title:
     if (el?.classList?.contains("l2edit") && el.dataset.var) editVals.current[el.dataset.var] = el.value;
   };
 
-  // Authentic L2 chrome: 9-slice the real GroupBox frame + Button sprite where available.
-  const winChrome: CSSProperties = frameUrl
-    ? { borderStyle: "solid", borderWidth: 8, borderImage: `url(${frameUrl}) 8 fill stretch`, background: "rgba(14,17,22,.96)" }
-    : { background: "linear-gradient(180deg,#20242c,#11151b)", border: "2px solid #2c3340", borderRadius: 4 };
-  const btnCss = btnUrl
-    ? `border:0;border-image:url(${btnUrl}) 7 fill stretch;border-width:7px;border-style:solid;`
-    : `border:1px solid #6b5a30;border-radius:2px;background:linear-gradient(180deg,#4a4230,#2a2418);`;
-  const btnHoverCss = btnOverUrl ? `border-image:url(${btnOverUrl}) 7 fill stretch;` : `background:linear-gradient(180deg,#5e5238,#352d1c);`;
-
   return (
-    <div style={{ position: "absolute", left: pos.x, top: pos.y, width: 440, maxHeight: 560, pointerEvents: "auto",
-                  color: "#d6cba6", display: "flex", flexDirection: "column", boxShadow: "0 8px 28px rgba(0,0,0,.6)", ...winChrome }}>
+    <div style={{ position: "absolute", left: pos.x, top: pos.y, width: 430, maxHeight: 560, pointerEvents: "auto",
+                  color: "#cbbf9c", display: "flex", flexDirection: "column", boxShadow: "0 8px 28px rgba(0,0,0,.7)",
+                  background: "#15161a", border: "1px solid #4a4640", borderRadius: 3, outline: "1px solid #0a0b0d", outlineOffset: -3 }}>
       <div onMouseDown={onTitleDown}
-        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 6px", marginBottom: 4, cursor: "move",
-                 borderBottom: "1px solid rgba(120,100,50,.4)", background: "linear-gradient(180deg,rgba(70,58,30,.7),rgba(40,32,16,.7))" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: "#f0e2b8", textShadow: "0 1px 1px #000" }}>{winTitle}</span>
-        <button onClick={onClose} style={{ width: 16, height: 16, fontSize: 10, color: "#cbbf9c", background: "transparent", border: "1px solid #5a4a2a", borderRadius: 2, cursor: "pointer" }}>×</button>
+        style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", height: 26, cursor: "move",
+                 borderBottom: "1px solid #2f2c27", background: "linear-gradient(180deg,#26241f,#17150f)" }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: "#f3ecd2", textShadow: "0 1px 2px #000", letterSpacing: .3 }}>{winTitle}</span>
+        <button onClick={onClose} style={{ position: "absolute", right: 6, top: 5, width: 16, height: 16, fontSize: 11, color: "#d8cca6", background: "transparent", border: "1px solid #5a554a", borderRadius: 2, cursor: "pointer" }}>×</button>
       </div>
       <div onClick={onClick} onInput={capture} onChange={capture} className="l2html"
-        style={{ overflowY: "auto", padding: "2px 8px 8px", fontSize: 12, lineHeight: 1.5, color: "#ccbf94" }}
+        style={{ overflowY: "auto", padding: "10px 12px 12px", fontSize: 12, lineHeight: 1.55, color: "#c6baa0" }}
         dangerouslySetInnerHTML={{ __html: safe }} />
       <style>{`
         .l2html{font-family:Tahoma,sans-serif}
         .l2html font[color]{color:inherit}
-        .l2html font[color="LEVEL"]{color:#b59a4d}
-        .l2html table{width:100%;border-collapse:collapse}
-        .l2html td{padding:2px 3px;vertical-align:middle}
+        .l2html font[color="LEVEL"]{color:#cdb155}
+        .l2html font[color="00FF00"]{color:#5cd05c}
+        .l2html table{width:100%;border-collapse:separate;border-spacing:3px}
+        .l2html td{padding:1px 2px;vertical-align:middle}
         .l2html a,.l2html .l2bypass:not(.l2btn){color:#7fb6ff;cursor:pointer;text-decoration:underline}
-        .l2html .l2btn{display:inline-block;min-width:48px;padding:3px 8px;margin:1px 0;text-align:center;box-sizing:border-box;
-          font-size:11px;color:#e7dcba;cursor:pointer;text-shadow:0 1px 1px #000;${btnCss}}
-        .l2html .l2btn:hover{color:#fff0c8;${btnHoverCss}}
-        .l2html .l2edit{height:18px;padding:0 5px;font-size:11px;color:#f3ecd2;box-sizing:border-box;
-          background:#0c0f14;border:1px solid #4a4030;border-radius:2px;outline:none;vertical-align:middle}
+        /* real L2 admin buttons: flat dark, thin tan border, beige text */
+        .l2html .l2btn{display:inline-block;width:100%;min-width:46px;padding:3px 6px;margin:0;text-align:center;box-sizing:border-box;
+          font-size:11px;color:#d4c39a;cursor:pointer;text-shadow:0 1px 1px #000;border-radius:3px;
+          border:1px solid #6f5f3c;background:linear-gradient(180deg,#2b2924,#1d1b16)}
+        .l2html .l2btn:hover{color:#fff0c8;border-color:#a98f4f;background:linear-gradient(180deg,#3a352a,#26221a)}
+        .l2html .l2btn:active{background:#161310}
+        .l2html .l2edit{height:19px;padding:0 5px;font-size:11px;color:#f3ecd2;box-sizing:border-box;
+          background:#0a0b0d;border:1px solid #4a463c;border-radius:2px;outline:none;vertical-align:middle}
         .l2html textarea.l2edit{height:auto;padding:3px 5px;resize:none;font-family:Tahoma,sans-serif}
         .l2html select.l2edit{height:20px}
-        .l2html .l2img{display:inline-block;background:rgba(120,110,80,.25);border:1px solid #4a4030;border-radius:2px;vertical-align:middle}
+        .l2html .l2img{display:inline-block;background:rgba(120,110,80,.2);border:1px solid #4a4030;border-radius:2px;vertical-align:middle}
       `}</style>
     </div>
   );
@@ -334,12 +337,10 @@ function SkillsPanel({ skills, onClose }: { skills: SkillEntry[]; onClose: () =>
   );
 }
 
-export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendChat, packetCount }: XdatHudProps) {
+export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendChat }: XdatHudProps) {
   const [chatText, setChatText] = useState("");
   const [openWindows, setOpenWindows] = useState<XdatWindowKey[]>([]);
   const [exitOpen, setExitOpen] = useState(false);
-  const [devMode, setDevMode] = useState(false);
-
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   // live state driven by the protocol layer
   const [live, setLive] = useState<Partial<PlayerState>>({});
@@ -348,6 +349,7 @@ export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendCh
   const [feed, setFeed] = useState<HudChatLine[]>([]);
   const [floats, setFloats] = useState<{ id: number; text: string; crit: boolean }[]>([]);
   const [htmlWnd, setHtmlWnd] = useState<{ html: string } | null>(null);
+  const [chatTab, setChatTab] = useState<"General" | "Party" | "Clan" | "Alliance">("General");
   const floatId = useRef(0);
 
   const toggleWindow = (k: XdatWindowKey) =>
@@ -469,21 +471,27 @@ export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendCh
 
   return (
     <div style={root}>
-      {/* ───── Player status (top-left) ───── */}
-      <div style={{ position: "absolute", left: 7, top: 6, width: STATUS_W, pointerEvents: "auto" }}>
-        {/* level badge + name row */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-          <Spr refId="L2UI_CH3.PlayerStatusWnd.ps_levelback" w={34} h={20}
-               style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "#f3e6b8", textShadow: "0 1px 1px #000" }}>{level}</span>
+      {/* ───── Player status (top-left) — matches the real PlayerStatusWnd ───── */}
+      <div style={{ position: "absolute", left: 7, top: 6, width: STATUS_W, pointerEvents: "auto",
+                    background: "linear-gradient(180deg,rgba(26,26,28,.72),rgba(12,12,14,.72))",
+                    border: "1px solid #3a3833", borderRadius: 3, padding: "3px 4px 4px" }}>
+        {/* level badge + name + action icons + collapse arrow */}
+        <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
+          <Spr refId="L2UI_CH3.PlayerStatusWnd.ps_levelback" w={22} h={20}
+               style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: "0 0 auto" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#f3e6b8", textShadow: "0 1px 1px #000" }}>{level}</span>
           </Spr>
-          <span style={{ fontSize: 12, fontWeight: 700, textShadow: "0 1px 1px #000", letterSpacing: .2 }}>{name}</span>
+          <span style={{ flex: 1, fontSize: 12, fontWeight: 700, textShadow: "0 1px 1px #000", letterSpacing: .2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
+          <span title="Premium" style={{ width: 18, height: 18, borderRadius: "50%", flex: "0 0 auto", background: "radial-gradient(circle at 40% 35%, #ffe680, #b8860b 70%, #5a3d05)", border: "1px solid #6b5a1a" }} />
+          <span title="Special" style={{ width: 18, height: 18, borderRadius: "50%", flex: "0 0 auto", background: "radial-gradient(circle at 40% 35%, #ff8a8a, #b02a2a 70%, #5a0d0d)", border: "1px solid #6b1a1a" }} />
+          <span style={{ flex: "0 0 auto", fontSize: 10, color: "#9a907a", marginLeft: 1 }}>▸</span>
         </div>
-        {/* gauges */}
+        {/* CP / HP / MP / VP bars with left tags + centred values */}
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <Gauge kind="CP" cur={cp} max={cpMax} w={STATUS_W} h={11} />
-          <Gauge kind="HP" cur={hp} max={hpMax} w={STATUS_W} h={13} />
-          <Gauge kind="MP" cur={mp} max={mpMax} w={STATUS_W} h={11} />
+          <Gauge kind="CP" cur={cp} max={cpMax} w={STATUS_W - 8} h={12} tag="CP" />
+          <Gauge kind="HP" cur={hp} max={hpMax} w={STATUS_W - 8} h={14} tag="HP" />
+          <Gauge kind="MP" cur={mp} max={mpMax} w={STATUS_W - 8} h={12} tag="MP" />
+          <Gauge kind="VP" cur={0} max={0} w={STATUS_W - 8} h={11} tag="VP" label=" " />
         </div>
       </div>
 
@@ -518,17 +526,19 @@ export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendCh
         <Minimap size={168} name={name} />
       </div>
 
-      {/* ───── Right-side vertical menu buttons ───── */}
-      <div style={{ position: "absolute", right: 6, top: 190, display: "flex", flexDirection: "column", gap: 3, pointerEvents: "auto" }}>
+      {/* ───── Right-side vertical menu (real client icons) ───── */}
+      <div style={{ position: "absolute", right: 4, top: 186, display: "flex", flexDirection: "column", gap: 2, pointerEvents: "auto" }}>
         {RIGHT_MENU.map((m) => {
           const active = m.win ? openWindows.includes(m.win) : false;
           return (
             <button key={m.title} title={m.title + (m.key ? ` (${m.key.toUpperCase()})` : "")} onClick={() => runItem(m)}
-              style={{ width: 34, height: 26, fontSize: 10, fontWeight: 700, letterSpacing: .3, lineHeight: 1, cursor: "pointer",
-                       color: active ? "#fff0c0" : "#e6dcc0",
-                       background: active ? "linear-gradient(180deg,#6a5a2a,#3a3018)" : "linear-gradient(180deg,#3a342a,#221e18)",
-                       border: "1px solid #5a4a2a", borderRadius: 3, textShadow: "0 1px 1px #000" }}>
-              {m.label}
+              style={{ width: 40, height: 40, padding: 0, cursor: "pointer", borderRadius: 6, lineHeight: 0,
+                       border: active ? "1px solid #d9b85a" : "1px solid transparent",
+                       background: active ? "rgba(150,120,40,.25)" : "transparent",
+                       boxShadow: active ? "0 0 6px rgba(217,184,90,.5)" : "none" }}>
+              {m.icon
+                ? <img src={m.icon} alt={m.label} width={38} height={38} draggable={false} style={{ display: "block", filter: active ? "brightness(1.2)" : "none" }} />
+                : <span style={{ fontSize: 10, color: "#e6dcc0" }}>{m.label}</span>}
             </button>
           );
         })}
@@ -546,25 +556,44 @@ export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendCh
         </div>
       </div>
 
-      {/* ───── Bottom-right main menu bar ───── */}
-      <div style={{ position: "absolute", right: 8, bottom: 28, display: "flex", gap: 2, pointerEvents: "auto" }}>
+      {/* ───── Bottom-right main menu bar (real client icons + menu) ───── */}
+      <div style={{ position: "absolute", right: 8, bottom: 26, display: "flex", alignItems: "center", gap: 2, pointerEvents: "auto" }}>
         {BOTTOM_MENU.map((m) => {
           const active = m.win ? openWindows.includes(m.win) : false;
           return (
             <button key={m.title} title={m.title} onClick={() => runItem(m)}
-              style={{ width: 32, height: 24, fontSize: 10, fontWeight: 700, cursor: "pointer",
-                       color: active ? "#fff0c0" : "#e6dcc0",
-                       background: active ? "linear-gradient(180deg,#6a5a2a,#3a3018)" : "linear-gradient(180deg,#3a342a,#221e18)",
-                       border: "1px solid #5a4a2a", borderRadius: 3 }}>
-              {m.label}
+              style={{ width: 30, height: 30, padding: 0, cursor: "pointer", borderRadius: 5, lineHeight: 0,
+                       border: active ? "1px solid #d9b85a" : "1px solid transparent",
+                       background: active ? "rgba(150,120,40,.25)" : "transparent" }}>
+              {m.icon
+                ? <img src={m.icon} alt={m.label} width={28} height={28} draggable={false} style={{ display: "block" }} />
+                : <span style={{ fontSize: 9, color: "#e6dcc0" }}>{m.label}</span>}
             </button>
           );
         })}
+        <button title="Menu" onClick={() => setExitOpen(true)}
+          style={{ width: 30, height: 30, marginLeft: 2, cursor: "pointer", color: "#e6dcc0", fontSize: 16, lineHeight: 1,
+                   background: "linear-gradient(180deg,#3a342a,#221e18)", border: "1px solid #6b5a30", borderRadius: 5 }}>≡</button>
       </div>
 
-      {/* ───── Chat (bottom-left) ───── */}
+      {/* ───── Chat (bottom-left) with channel tabs ───── */}
       <div style={{ position: "absolute", left: 8, bottom: 28, width: 360, pointerEvents: "auto" }}>
-        <div ref={chatScrollRef} style={{ maxHeight: 116, overflowY: "auto", padding: "4px 6px", fontSize: 11, lineHeight: 1.45, background: "rgba(8,10,8,.35)", borderRadius: 3 }}>
+        <div style={{ display: "flex", gap: 1, marginBottom: 1 }}>
+          {(["General", "Party", "Clan", "Alliance"] as const).map((t, i) => {
+            const col = chatColor([0, 3, 4, 9][i]);
+            const active = chatTab === t;
+            return (
+              <button key={t} onClick={() => setChatTab(t)}
+                style={{ padding: "2px 9px", fontSize: 10, fontWeight: 700, cursor: "pointer", color: active ? "#fff0c8" : col,
+                         background: active ? "linear-gradient(180deg,#33302a,#1c1a15)" : "linear-gradient(180deg,#211f1a,#14120e)",
+                         border: "1px solid #4a4436", borderBottom: active ? "1px solid transparent" : "1px solid #4a4436",
+                         borderTopLeftRadius: 3, borderTopRightRadius: 3 }}>
+                {t}
+              </button>
+            );
+          })}
+        </div>
+        <div ref={chatScrollRef} style={{ maxHeight: 116, overflowY: "auto", padding: "4px 6px", fontSize: 11, lineHeight: 1.45, background: "rgba(8,10,8,.45)", border: "1px solid #2a2820", borderRadius: 2 }}>
           {lines.map((l, i) => (
             <div key={i} style={{ color: l.color ?? "#cabf9b", textShadow: "0 1px 1px #000" }}>{l.text}</div>
           ))}
@@ -588,42 +617,12 @@ export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendCh
       {openWindows.map((k) =>
         k === "skills" ? (
           <SkillsPanel key={k} skills={skills} onClose={() => closeWindow(k)} />
-        ) : devMode ? (
+        ) : (
           <div key={k} style={{ pointerEvents: "auto" }}>
             <L2XdatWindow windowKey={k} onClose={() => closeWindow(k)} />
           </div>
-        ) : null
+        )
       )}
-
-      {/* ───── DEV toggle (tiny, top-right corner) ───── */}
-      <div style={{ position: "absolute", top: 4, right: 4, pointerEvents: "auto", display: "flex", gap: 4, alignItems: "center" }}>
-        {devMode && (
-          <span style={{ fontSize: 9, fontFamily: "ui-monospace, Menlo, monospace", color: "#8a7f5f", textShadow: "0 1px 1px #000" }}>
-            pkts {packetCount ?? 0}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={() => setDevMode((v) => !v)}
-          title="Toggle developer overlays (xdat skeletons)"
-          style={{
-            fontSize: 9,
-            fontWeight: 700,
-            letterSpacing: 1,
-            padding: "2px 6px",
-            color: devMode ? "#ffd97a" : "#7a6f4f",
-            background: devMode ? "linear-gradient(180deg,#3a3018,#1a1408)" : "rgba(0,0,0,0.35)",
-            border: `1px solid ${devMode ? "#6a5a2a" : "#3a3024"}`,
-            borderRadius: 2,
-            cursor: "pointer",
-            textShadow: "0 1px 1px #000",
-          }}
-        >
-          DEV
-        </button>
-      </div>
-
-
 
       {/* ───── Server HTML window (NPC dialogs + GM/admin panel) ───── */}
       {htmlWnd && (

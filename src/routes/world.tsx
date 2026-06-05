@@ -219,8 +219,6 @@ function WorldPage() {
           isLandscape ? (
             <MobileGameHud
               targetId={targetId}
-              activeChar={char ?? undefined}
-              chatLines={chat}
               onAttack={() => {
                 const id = getSelectedTarget();
                 if (id != null) getGameConnection()?.sendAttack(id);
@@ -230,9 +228,7 @@ function WorldPage() {
                 if (id != null) getGameConnection()?.sendAction(id);
               }}
               onMove={handleJoystick}
-              onSay={sendChat}
-              onExit={leaveWorld}
-              packetCount={packetCount}
+              onSay={(text) => getGameConnection()?.sendSay(text)}
             />
           ) : (
             <RotateDeviceOverlay />
@@ -244,10 +240,13 @@ function WorldPage() {
             chatLines={chat}
             onExit={leaveWorld}
             onSendChat={sendChat}
-            packetCount={packetCount}
           />
         )}
       </SpriteProvider>
+
+      <div className="absolute top-1.5 left-1/2 -translate-x-1/2 text-[8px] font-mono text-muted-foreground tracking-widest pointer-events-none z-50">
+        L2SLAVE · {char?.name ?? "—"} · pkts {packetCount}
+      </div>
     </div>
   );
 }
