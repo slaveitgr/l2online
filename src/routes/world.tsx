@@ -1,16 +1,14 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { WorldViewport } from "@/components/WorldViewport";
-import {
-  type HudActiveChar,
-  type HudChatLine,
-} from "@/components/hud/L2HudAuthentic";
 import { XdatHud } from "@/components/hud/XdatHud";
-
+import type {
+  HudActiveChar,
+  HudChatLine,
+} from "@/components/hud/L2HudAuthentic";
 import { SpriteProvider } from "@/components/hud/L2Sprite";
 import { MobileGameHud } from "@/components/mobile/MobileGameHud";
 import { RotateDeviceOverlay } from "@/components/mobile/RotateDeviceOverlay";
-import { WorldPreloader } from "@/components/WorldPreloader";
 import { useIsMobileGame } from "@/hooks/useIsMobileGame";
 import { lockLandscape } from "@/lib/mobile/orientation";
 import {
@@ -22,9 +20,7 @@ import {
   useSelectedTarget,
   getSelectedTarget,
   setSelectedTarget,
-  setDialogTarget,
 } from "@/lib/game-state";
-import { NpcDialog, NpcInteractPrompt } from "@/components/hud/NpcDialog";
 
 export const Route = createFileRoute("/world")({
   head: () => ({
@@ -60,15 +56,6 @@ function WorldPage() {
   const [packetCount, setPacketCount] = useState(0);
   const { isMobile, isLandscape } = useIsMobileGame();
   const targetId = useSelectedTarget();
-  const [ready, setReady] = useState(false);
-  const [loadPct, setLoadPct] = useState(0);
-  const [loadMsg, setLoadMsg] = useState("Initializing…");
-
-  useEffect(() => {
-    if (ready) return;
-    const t = setTimeout(() => setReady(true), 20000);
-    return () => clearTimeout(t);
-  }, [ready]);
 
   const joyRef = useRef<{ dx: number; dy: number; timer: ReturnType<typeof setInterval> | null }>({
     dx: 0,
@@ -157,35 +144,8 @@ function WorldPage() {
   }, [navigate]);
 
   useEffect(() => {
-    if (!isMobile) return;
-    void lockLandscape();
-
-    // On first user gesture: request fullscreen + resume any AudioContext so sound is on by default.
-    const onFirstTap = () => {
-      try {
-        const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => Promise<void> };
-        const req = el.requestFullscreen ?? el.webkitRequestFullscreen;
-        if (req && !document.fullscreenElement) void req.call(el).catch(() => {});
-      } catch { /* ignore */ }
-      try {
-        const w = window as unknown as { __l2AudioCtx?: AudioContext; AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
-        const Ctor = w.AudioContext ?? w.webkitAudioContext;
-        if (Ctor) {
-          if (!w.__l2AudioCtx) w.__l2AudioCtx = new Ctor();
-          if (w.__l2AudioCtx.state === "suspended") void w.__l2AudioCtx.resume().catch(() => {});
-        }
-      } catch { /* ignore */ }
-      window.removeEventListener("pointerdown", onFirstTap);
-      window.removeEventListener("touchstart", onFirstTap);
-    };
-    window.addEventListener("pointerdown", onFirstTap, { once: false });
-    window.addEventListener("touchstart", onFirstTap, { once: false, passive: true });
-    return () => {
-      window.removeEventListener("pointerdown", onFirstTap);
-      window.removeEventListener("touchstart", onFirstTap);
-    };
+    if (isMobile) void lockLandscape();
   }, [isMobile]);
-
 
   useEffect(() => {
     return () => {
@@ -254,7 +214,6 @@ function WorldPage() {
         onGroundTap={(x, y, z) => getGameConnection()?.sendMoveTo(x, y, z)}
       />
 
-
       <SpriteProvider>
         {isMobile ? (
           isLandscape ? (
@@ -266,10 +225,7 @@ function WorldPage() {
               }}
               onInteract={() => {
                 const id = getSelectedTarget();
-                if (id != null) {
-                  getGameConnection()?.sendAction(id);
-                  setDialogTarget(id);
-                }
+                if (id != null) getGameConnection()?.sendAction(id);
               }}
               onMove={handleJoystick}
               onSay={(text) => getGameConnection()?.sendSay(text)}
@@ -285,21 +241,12 @@ function WorldPage() {
             onExit={leaveWorld}
             onSendChat={sendChat}
           />
-
         )}
       </SpriteProvider>
-
-      {/* NPC interaction layer (hover prompt + talk dialog). */}
-      <NpcInteractPrompt />
-      <NpcDialog onSay={(line) => setChat((c) => [...c, { color: "#9c906f", text: line }])} />
 
       <div className="absolute top-1.5 left-1/2 -translate-x-1/2 text-[8px] font-mono text-muted-foreground tracking-widest pointer-events-none z-50">
         L2SLAVE · {char?.name ?? "—"} · pkts {packetCount}
       </div>
-
-      {!ready && (
-        <WorldPreloader percent={loadPct} message={loadMsg} charName={char?.name} />
-      )}
     </div>
   );
 }
