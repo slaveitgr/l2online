@@ -5,7 +5,7 @@ import {
   type HudActiveChar,
   type HudChatLine,
 } from "@/components/hud/L2HudAuthentic";
-import { DesktopHud } from "@/components/hud/desktop/DesktopHud";
+import { XdatHud } from "@/components/hud/XdatHud";
 
 import { SpriteProvider } from "@/components/hud/L2Sprite";
 import { MobileGameHud } from "@/components/mobile/MobileGameHud";
@@ -278,7 +278,8 @@ function WorldPage() {
             <RotateDeviceOverlay />
           )
         ) : (
-          <DesktopHud
+          <XdatHud
+            uiScale={1.0}
             activeChar={char ?? undefined}
             chatLines={chat}
             onExit={leaveWorld}
