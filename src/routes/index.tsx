@@ -159,6 +159,10 @@ function Launcher() {
     setServers([]);
     setSelectedServer(null);
     setPhase("login");
+    // user explicitly bailed — don't auto-login again with the stored token
+    clearSsoSession();
+    autoEnterRef.current = false;
+    setSsoPhase("ready");
   }
 
   async function onEnterWorld() {
