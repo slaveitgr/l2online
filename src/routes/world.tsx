@@ -278,7 +278,8 @@ function WorldPage() {
             <RotateDeviceOverlay />
           )
         ) : (
-          <DesktopHud
+          <XdatHud
+            uiScale={1.0}
             activeChar={char ?? undefined}
             chatLines={chat}
             onExit={leaveWorld}
