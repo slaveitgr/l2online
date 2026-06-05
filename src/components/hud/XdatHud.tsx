@@ -212,7 +212,7 @@ function L2HtmlWindow({ html, title, onBypass, onClose }: { html: string; title:
     const t = (e.target as HTMLElement).closest?.(".l2bypass") as HTMLElement | null;
     if (t?.dataset.cmd) { e.preventDefault(); onBypass(subst(t.dataset.cmd)); }
   };
-  const onInput = (e: ReactMouseEvent) => {
+  const onInput = (e: React.FormEvent<HTMLDivElement>) => {
     const el = e.target as HTMLInputElement;
     if (el.classList?.contains("l2edit") && el.dataset.var) editVals.current[el.dataset.var] = el.value;
   };
