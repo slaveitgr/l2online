@@ -184,8 +184,8 @@ export function L2LoginScreen({
             {error}
           </div>
         ) : null}
-        <StatusLog lines={statusLog} />
       </div>
     </L2LauncherShell>
   );
 }
+
