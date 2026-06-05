@@ -58,7 +58,9 @@ interface XdatHudProps {
   chatLines?: HudChatLine[];
   onExit?: () => void;
   onSendChat?: (text: string) => void;
+  packetCount?: number;
 }
+
 
 const GAUGE = "/hud/gauges"; // CP/HP/MP/EXP _bg.png + _fill.png (256x16)
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
