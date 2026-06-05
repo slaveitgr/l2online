@@ -110,35 +110,6 @@ function L2DialogButton({
   );
 }
 
-function StatusLog({ lines }: { lines?: string[] }) {
-  const visible = (lines ?? []).slice(-5);
-  if (!visible.length) return null;
-  return (
-    <div
-      style={{
-        marginTop: 12,
-        width: 360,
-        maxWidth: "80vw",
-        padding: "6px 8px",
-        background: "rgba(0,0,0,0.45)",
-        border: "1px solid rgba(132,107,58,0.55)",
-        color: "#cfc6a4",
-        fontFamily: "Arial, Helvetica, sans-serif",
-        fontSize: 11,
-        lineHeight: 1.35,
-        textAlign: "left",
-        textShadow,
-      }}
-    >
-      {visible.map((line, idx) => (
-        <div key={`${idx}-${line}`} style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {line}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function L2LoginScreen({
   onLogin,
   error,
@@ -158,7 +129,7 @@ export function L2LoginScreen({
   };
 
   return (
-    <L2LauncherShell>
+    <L2LauncherShell logs={statusLog}>
       <div
         style={{
           position: "absolute",
