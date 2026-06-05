@@ -168,7 +168,7 @@ function Launcher() {
       {phase === "login" ? (
         <L2LoginScreen onLogin={doLogin} busy={busy} error={error} statusLog={statusLog} />
       ) : (
-        <L2LauncherShell>
+        <L2LauncherShell logs={statusLog}>
           <div
             style={{
               position: "absolute",
