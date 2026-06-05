@@ -58,7 +58,9 @@ interface XdatHudProps {
   chatLines?: HudChatLine[];
   onExit?: () => void;
   onSendChat?: (text: string) => void;
+  packetCount?: number;
 }
+
 
 const GAUGE = "/hud/gauges"; // CP/HP/MP/EXP _bg.png + _fill.png (256x16)
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
@@ -173,6 +175,20 @@ function Minimap({ size = 168, name }: { size?: number; name: string }) {
  */
 function L2HtmlWindow({ html, title, onBypass, onClose }: { html: string; title: string; onBypass: (cmd: string) => void; onClose: () => void }) {
   const editVals = useRef<Record<string, string>>({});
+  const reg = useSprites();
+  const btnUrl = reg?.url("L2UI_CT1.Button_DF_Click") ?? null;
+  const btnOverUrl = reg?.url("L2UI_CT1.Button_DF_Over") ?? null;
+  const frameUrl = reg?.url("L2UI_CT1.GroupBox_DF") ?? null;
+
+  // draggable window
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 292, y: 70 });
+  const drag = useRef<{ ox: number; oy: number } | null>(null);
+  const onTitleDown = (e: ReactMouseEvent) => {
+    drag.current = { ox: e.clientX - pos.x, oy: e.clientY - pos.y };
+    const move = (ev: globalThis.MouseEvent) => { if (drag.current) setPos({ x: ev.clientX - drag.current.ox, y: ev.clientY - drag.current.oy }); };
+    const up = () => { drag.current = null; window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+  };
   // Window title: a <title> tag if present, else the htm's first prominent header, else the default.
   const winTitle =
     (html.match(/<title>([\s\S]*?)<\/title>/i) || [])[1] ??
@@ -244,17 +260,26 @@ function L2HtmlWindow({ html, title, onBypass, onClose }: { html: string; title:
     if (el?.classList?.contains("l2edit") && el.dataset.var) editVals.current[el.dataset.var] = el.value;
   };
 
+  // Authentic L2 chrome: 9-slice the real GroupBox frame + Button sprite where available.
+  const winChrome: CSSProperties = frameUrl
+    ? { borderStyle: "solid", borderWidth: 8, borderImage: `url(${frameUrl}) 8 fill stretch`, background: "rgba(14,17,22,.96)" }
+    : { background: "linear-gradient(180deg,#20242c,#11151b)", border: "2px solid #2c3340", borderRadius: 4 };
+  const btnCss = btnUrl
+    ? `border:0;border-image:url(${btnUrl}) 7 fill stretch;border-width:7px;border-style:solid;`
+    : `border:1px solid #6b5a30;border-radius:2px;background:linear-gradient(180deg,#4a4230,#2a2418);`;
+  const btnHoverCss = btnOverUrl ? `border-image:url(${btnOverUrl}) 7 fill stretch;` : `background:linear-gradient(180deg,#5e5238,#352d1c);`;
+
   return (
-    <div style={{ position: "absolute", left: "50%", top: 70, transform: "translateX(-50%)", width: 440, maxHeight: 540, pointerEvents: "auto",
-                  background: "linear-gradient(180deg,#20242c,#11151b)", border: "2px solid #2c3340", borderRadius: 4, color: "#d6cba6",
-                  display: "flex", flexDirection: "column", boxShadow: "0 8px 28px rgba(0,0,0,.6)" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 8px", borderBottom: "1px solid #303a48",
-                    background: "linear-gradient(180deg,#39424f,#222933)" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: "#e9dfbf" }}>{winTitle}</span>
+    <div style={{ position: "absolute", left: pos.x, top: pos.y, width: 440, maxHeight: 560, pointerEvents: "auto",
+                  color: "#d6cba6", display: "flex", flexDirection: "column", boxShadow: "0 8px 28px rgba(0,0,0,.6)", ...winChrome }}>
+      <div onMouseDown={onTitleDown}
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 6px", marginBottom: 4, cursor: "move",
+                 borderBottom: "1px solid rgba(120,100,50,.4)", background: "linear-gradient(180deg,rgba(70,58,30,.7),rgba(40,32,16,.7))" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#f0e2b8", textShadow: "0 1px 1px #000" }}>{winTitle}</span>
         <button onClick={onClose} style={{ width: 16, height: 16, fontSize: 10, color: "#cbbf9c", background: "transparent", border: "1px solid #5a4a2a", borderRadius: 2, cursor: "pointer" }}>×</button>
       </div>
       <div onClick={onClick} onInput={capture} onChange={capture} className="l2html"
-        style={{ overflowY: "auto", padding: 10, fontSize: 12, lineHeight: 1.5, color: "#ccbf94" }}
+        style={{ overflowY: "auto", padding: "2px 8px 8px", fontSize: 12, lineHeight: 1.5, color: "#ccbf94" }}
         dangerouslySetInnerHTML={{ __html: safe }} />
       <style>{`
         .l2html{font-family:Tahoma,sans-serif}
@@ -263,11 +288,9 @@ function L2HtmlWindow({ html, title, onBypass, onClose }: { html: string; title:
         .l2html table{width:100%;border-collapse:collapse}
         .l2html td{padding:2px 3px;vertical-align:middle}
         .l2html a,.l2html .l2bypass:not(.l2btn){color:#7fb6ff;cursor:pointer;text-decoration:underline}
-        .l2html .l2btn{display:inline-block;min-width:48px;padding:3px 6px;margin:1px 0;text-align:center;box-sizing:border-box;
-          font-size:11px;color:#e7dcba;cursor:pointer;border:1px solid #6b5a30;border-radius:2px;
-          background:linear-gradient(180deg,#4a4230,#2a2418);text-shadow:0 1px 1px #000}
-        .l2html .l2btn:hover{background:linear-gradient(180deg,#5e5238,#352d1c);color:#fff0c8}
-        .l2html .l2btn:active{background:#241f14}
+        .l2html .l2btn{display:inline-block;min-width:48px;padding:3px 8px;margin:1px 0;text-align:center;box-sizing:border-box;
+          font-size:11px;color:#e7dcba;cursor:pointer;text-shadow:0 1px 1px #000;${btnCss}}
+        .l2html .l2btn:hover{color:#fff0c8;${btnHoverCss}}
         .l2html .l2edit{height:18px;padding:0 5px;font-size:11px;color:#f3ecd2;box-sizing:border-box;
           background:#0c0f14;border:1px solid #4a4030;border-radius:2px;outline:none;vertical-align:middle}
         .l2html textarea.l2edit{height:auto;padding:3px 5px;resize:none;font-family:Tahoma,sans-serif}
@@ -311,10 +334,12 @@ function SkillsPanel({ skills, onClose }: { skills: SkillEntry[]; onClose: () =>
   );
 }
 
-export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendChat }: XdatHudProps) {
+export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendChat, packetCount }: XdatHudProps) {
   const [chatText, setChatText] = useState("");
   const [openWindows, setOpenWindows] = useState<XdatWindowKey[]>([]);
   const [exitOpen, setExitOpen] = useState(false);
+  const [devMode, setDevMode] = useState(false);
+
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   // live state driven by the protocol layer
   const [live, setLive] = useState<Partial<PlayerState>>({});
@@ -563,12 +588,42 @@ export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendCh
       {openWindows.map((k) =>
         k === "skills" ? (
           <SkillsPanel key={k} skills={skills} onClose={() => closeWindow(k)} />
-        ) : (
+        ) : devMode ? (
           <div key={k} style={{ pointerEvents: "auto" }}>
             <L2XdatWindow windowKey={k} onClose={() => closeWindow(k)} />
           </div>
-        )
+        ) : null
       )}
+
+      {/* ───── DEV toggle (tiny, top-right corner) ───── */}
+      <div style={{ position: "absolute", top: 4, right: 4, pointerEvents: "auto", display: "flex", gap: 4, alignItems: "center" }}>
+        {devMode && (
+          <span style={{ fontSize: 9, fontFamily: "ui-monospace, Menlo, monospace", color: "#8a7f5f", textShadow: "0 1px 1px #000" }}>
+            pkts {packetCount ?? 0}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => setDevMode((v) => !v)}
+          title="Toggle developer overlays (xdat skeletons)"
+          style={{
+            fontSize: 9,
+            fontWeight: 700,
+            letterSpacing: 1,
+            padding: "2px 6px",
+            color: devMode ? "#ffd97a" : "#7a6f4f",
+            background: devMode ? "linear-gradient(180deg,#3a3018,#1a1408)" : "rgba(0,0,0,0.35)",
+            border: `1px solid ${devMode ? "#6a5a2a" : "#3a3024"}`,
+            borderRadius: 2,
+            cursor: "pointer",
+            textShadow: "0 1px 1px #000",
+          }}
+        >
+          DEV
+        </button>
+      </div>
+
+
 
       {/* ───── Server HTML window (NPC dialogs + GM/admin panel) ───── */}
       {htmlWnd && (
