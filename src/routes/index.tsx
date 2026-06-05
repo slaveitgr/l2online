@@ -218,6 +218,51 @@ function Launcher() {
     }
   }
 
+  // After auto-login (SSO or stored session), enter the world automatically
+  // once the server list arrives — user never sees server-select.
+  useEffect(() => {
+    if (!autoEnterRef.current) return;
+    if (phase !== "server-select") return;
+    if (selectedServer == null) return;
+    if (busy) return;
+    autoEnterRef.current = false;
+    void onEnterWorld();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, selectedServer, busy]);
+
+  // If auto-login fails, fall back to the manual login screen.
+  useEffect(() => {
+    if (ssoPhase === "checking" && error && !busy && phase === "login") {
+      clearSsoSession();
+      autoEnterRef.current = false;
+      setSsoPhase("failed");
+    }
+  }, [ssoPhase, error, busy, phase]);
+
+  if (ssoPhase === "checking") {
+    return (
+      <SpriteProvider>
+        <L2LauncherShell logs={statusLog}>
+          <div
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: "55%",
+              transform: "translate(-50%, -50%)",
+              color: "#e6dcb6",
+              fontFamily: "Arial, Helvetica, sans-serif",
+              fontSize: 13,
+              textShadow: "0 1px 2px #000, 0 0 4px #000",
+              pointerEvents: "none",
+            }}
+          >
+            Signing in…
+          </div>
+        </L2LauncherShell>
+      </SpriteProvider>
+    );
+  }
+
   return (
     <SpriteProvider>
       {phase === "login" ? (
