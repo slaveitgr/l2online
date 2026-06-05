@@ -5,6 +5,14 @@ import { L2GameClient, setGameConnection, type GameEvent } from "@/lib/l2-protoc
 import { SpriteProvider } from "@/components/hud/L2Sprite";
 import { L2LoginScreen } from "@/components/hud/L2LoginScreen";
 import { L2LauncherShell } from "@/components/hud/L2LauncherShell";
+import {
+  readSsoTokenFromUrl,
+  stripSsoFromUrl,
+  verifySsoToken,
+  saveSsoSession,
+  loadSsoSession,
+  clearSsoSession,
+} from "@/lib/l2-protocol/sso";
 
 const GAME_PROTOCOL = 502;
 
@@ -20,6 +28,7 @@ export const Route = createFileRoute("/")({
 });
 
 type Phase = "login" | "server-select";
+type SsoPhase = "checking" | "ready" | "failed";
 
 function Launcher() {
   const navigate = useNavigate();
@@ -30,7 +39,12 @@ function Launcher() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusLog, setStatusLog] = useState<string[]>([]);
+  // SSR-safe initial state: always "ready", then upgrade to "checking" inside
+  // the effect once we know we are on the client and have a token/session.
+  const [ssoPhase, setSsoPhase] = useState<SsoPhase>("ready");
   const loginRef = useRef<L2LoginClient | null>(null);
+  const autoEnterRef = useRef(false);
+  const ssoRanRef = useRef(false);
 
   useEffect(() => {
     try {
