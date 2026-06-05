@@ -14,6 +14,9 @@
  */
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useSprites } from "@/components/hud/L2Sprite";
+import { getGameConnection } from "@/lib/l2-protocol/game-client";
+import { L2XdatWindow, type XdatWindowKey } from "@/components/hud/L2XdatWindow";
+import { L2ExitDialog } from "@/components/hud/L2GameWindows";
 
 export interface HudActiveChar {
   name: string;
@@ -74,25 +77,104 @@ function Spr({ refId, w, h, style, children }: { refId: string; w?: number; h?: 
   );
 }
 
-const RIGHT_MENU: { icon: string; title: string }[] = [
-  { icon: "👜", title: "Inventory" },
-  { icon: "⚔", title: "Action" },
-  { icon: "✦", title: "Skills" },
-  { icon: "📜", title: "Quest" },
-  { icon: "👥", title: "Party" },
-  { icon: "🛡", title: "Clan" },
-  { icon: "🗺", title: "Map" },
-  { icon: "⚙", title: "System" },
+// Menu entries -> the xdat window each opens (+ optional hotkey).
+type MenuItem = { label: string; title: string; win?: XdatWindowKey; key?: string; action?: "exit" };
+const RIGHT_MENU: MenuItem[] = [
+  { label: "INV", title: "Inventory", win: "equipment", key: "i" },
+  { label: "ACT", title: "Actions", win: "actions" },
+  { label: "SKL", title: "Skills", win: "skills", key: "k" },
+  { label: "QST", title: "Quest", win: "quest", key: "j" },
+  { label: "CHR", title: "Character", win: "character", key: "t" },
+  { label: "CLN", title: "Clan", win: "clan" },
+  { label: "MAP", title: "Map", win: "map", key: "m" },
+  { label: "SYS", title: "System / Exit", action: "exit" },
 ];
+const BOTTOM_MENU: MenuItem[] = [
+  { label: "INV", title: "Inventory", win: "equipment", key: "i" },
+  { label: "SKL", title: "Skills", win: "skills", key: "k" },
+  { label: "QST", title: "Quest", win: "quest" },
+  { label: "MAP", title: "Map", win: "map" },
+  { label: "STR", title: "Store", win: "store" },
+  { label: "SYS", title: "Exit", action: "exit" },
+];
+
+/** Live minimap: player centred, NPCs/players as dots, scaled from world coords. */
+function Minimap({ size = 168, name }: { size?: number; name: string }) {
+  const reg = useSprites();
+  const ref = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    let raf = 0;
+    const VIEW = 6000; // world units across the minimap
+    const scale = size / VIEW;
+    const draw = () => {
+      const cv = ref.current;
+      const conn = getGameConnection();
+      if (cv) {
+        const ctx = cv.getContext("2d");
+        if (ctx) {
+          ctx.clearRect(0, 0, size, size);
+          const p = conn?.getPlayer?.();
+          const cx = size / 2, cy = size / 2;
+          // range rings
+          ctx.strokeStyle = "rgba(120,140,110,.18)";
+          for (const rr of [size / 4, size / 2.4]) { ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke(); }
+          if (p) {
+            for (const e of conn?.getEntities?.() ?? []) {
+              const dx = (e.x - p.x) * scale, dy = (e.y - p.y) * scale;
+              if (Math.hypot(dx, dy) > size / 2 - 4) continue;
+              ctx.fillStyle = e.isPlayer ? "#5fa9ff" : "#d7b24a";
+              ctx.beginPath(); ctx.arc(cx + dx, cy + dy, e.isPlayer ? 2.4 : 2, 0, Math.PI * 2); ctx.fill();
+            }
+          }
+          // self
+          ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = "#1a2a16"; ctx.lineWidth = 1; ctx.stroke();
+        }
+      }
+      raf = requestAnimationFrame(() => setTimeout(() => { raf = requestAnimationFrame(draw); }, 400));
+    };
+    draw();
+    return () => cancelAnimationFrame(raf);
+  }, [size]);
+  const frame = reg?.url("L2UI_CT1.Minimap.Minimap_DF_TexShadowBottom") ?? null;
+  return (
+    <div style={{ width: size, height: size, position: "relative", border: "2px solid #2c2415", borderRadius: 4, background: "radial-gradient(circle at 50% 50%, #1b2a1d, #0c130d 78%)", backgroundImage: frame ? `url(${frame})` : undefined, backgroundSize: "100% 100%" }}>
+      <canvas ref={ref} width={size} height={size} style={{ position: "absolute", inset: 0 }} />
+      <span style={{ position: "absolute", left: 4, top: 2, fontSize: 9, color: "#9fb089", textShadow: "0 1px 1px #000", pointerEvents: "none" }}>{name}</span>
+    </div>
+  );
+}
 
 export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendChat }: XdatHudProps) {
   const [chatText, setChatText] = useState("");
+  const [openWindows, setOpenWindows] = useState<XdatWindowKey[]>([]);
+  const [exitOpen, setExitOpen] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+
+  const toggleWindow = (k: XdatWindowKey) =>
+    setOpenWindows((ws) => (ws.includes(k) ? ws.filter((w) => w !== k) : [...ws, k]));
+  const closeWindow = (k: XdatWindowKey) => setOpenWindows((ws) => ws.filter((w) => w !== k));
+  const runItem = (m: MenuItem) => { if (m.action === "exit") setExitOpen(true); else if (m.win) toggleWindow(m.win); };
 
   useEffect(() => {
     const el = chatScrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [chatLines]);
+
+  // Hotkeys (skip while typing in an input). Esc closes the topmost window / exit dialog.
+  useEffect(() => {
+    const keyMap: Record<string, XdatWindowKey> = {};
+    for (const m of RIGHT_MENU) if (m.key && m.win) keyMap[m.key] = m.win;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el?.matches?.("input,textarea")) return;
+      if (e.key === "Escape") { setExitOpen(false); setOpenWindows((ws) => ws.slice(0, -1)); return; }
+      const k = e.key.toLowerCase();
+      if (keyMap[k]) { e.preventDefault(); toggleWindow(keyMap[k]); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // vitals come from the activeChar snapshot, which /world keeps live from packets
   const name = activeChar?.name ?? "—";
@@ -136,23 +218,25 @@ export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendCh
         </div>
       </div>
 
-      {/* ───── Minimap frame (top-right) ───── */}
-      <div style={{ position: "absolute", right: 8, top: 8, width: 168, height: 168, pointerEvents: "auto" }}>
-        <Spr refId="L2UI_CT1.Minimap.Minimap_DF_TexShadowBottom" w={168} h={168}
-             style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "radial-gradient(circle at 50% 50%, #1b2a1d, #0c130d 75%)", border: "2px solid #2c2415", borderRadius: 4 }}>
-          <span style={{ fontSize: 9, color: "#7d8a6b", opacity: .8 }}>{name}</span>
-        </Spr>
+      {/* ───── Minimap (top-right, live) ───── */}
+      <div style={{ position: "absolute", right: 8, top: 8, pointerEvents: "auto" }}>
+        <Minimap size={168} name={name} />
       </div>
 
       {/* ───── Right-side vertical menu buttons ───── */}
       <div style={{ position: "absolute", right: 6, top: 190, display: "flex", flexDirection: "column", gap: 3, pointerEvents: "auto" }}>
-        {RIGHT_MENU.map((m) => (
-          <button key={m.title} title={m.title}
-            style={{ width: 30, height: 26, fontSize: 14, lineHeight: 1, cursor: "pointer",
-                     color: "#e6dcc0", background: "linear-gradient(180deg,#3a342a,#221e18)", border: "1px solid #5a4a2a", borderRadius: 3, textShadow: "0 1px 1px #000" }}>
-            {m.icon}
-          </button>
-        ))}
+        {RIGHT_MENU.map((m) => {
+          const active = m.win ? openWindows.includes(m.win) : false;
+          return (
+            <button key={m.title} title={m.title + (m.key ? ` (${m.key.toUpperCase()})` : "")} onClick={() => runItem(m)}
+              style={{ width: 34, height: 26, fontSize: 10, fontWeight: 700, letterSpacing: .3, lineHeight: 1, cursor: "pointer",
+                       color: active ? "#fff0c0" : "#e6dcc0",
+                       background: active ? "linear-gradient(180deg,#6a5a2a,#3a3018)" : "linear-gradient(180deg,#3a342a,#221e18)",
+                       border: "1px solid #5a4a2a", borderRadius: 3, textShadow: "0 1px 1px #000" }}>
+              {m.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* ───── Shortcut hotbar (bottom-center) ───── */}
@@ -169,13 +253,18 @@ export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendCh
 
       {/* ───── Bottom-right main menu bar ───── */}
       <div style={{ position: "absolute", right: 8, bottom: 28, display: "flex", gap: 2, pointerEvents: "auto" }}>
-        {["⚔", "🎒", "✦", "📖", "🗺", "⚙"].map((ic, i) => (
-          <button key={i} onClick={i === 5 ? onExit : undefined}
-            style={{ width: 28, height: 24, fontSize: 13, cursor: "pointer", color: "#e6dcc0",
-                     background: "linear-gradient(180deg,#3a342a,#221e18)", border: "1px solid #5a4a2a", borderRadius: 3 }}>
-            {ic}
-          </button>
-        ))}
+        {BOTTOM_MENU.map((m) => {
+          const active = m.win ? openWindows.includes(m.win) : false;
+          return (
+            <button key={m.title} title={m.title} onClick={() => runItem(m)}
+              style={{ width: 32, height: 24, fontSize: 10, fontWeight: 700, cursor: "pointer",
+                       color: active ? "#fff0c0" : "#e6dcc0",
+                       background: active ? "linear-gradient(180deg,#6a5a2a,#3a3018)" : "linear-gradient(180deg,#3a342a,#221e18)",
+                       border: "1px solid #5a4a2a", borderRadius: 3 }}>
+              {m.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* ───── Chat (bottom-left) ───── */}
@@ -201,6 +290,20 @@ export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendCh
       <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 8, pointerEvents: "auto" }}>
         <Gauge kind="EXP" cur={expPct} w={1024} h={8} showText={false} />
       </div>
+
+      {/* ───── Open game windows (Inventory / Skills / Map / …) ───── */}
+      {openWindows.map((k) => (
+        <div key={k} style={{ pointerEvents: "auto" }}>
+          <L2XdatWindow windowKey={k} onClose={() => closeWindow(k)} />
+        </div>
+      ))}
+
+      {/* ───── Exit dialog ───── */}
+      {exitOpen && (
+        <div style={{ pointerEvents: "auto" }}>
+          <L2ExitDialog onExit={() => { setExitOpen(false); onExit?.(); }} onCancel={() => setExitOpen(false)} />
+        </div>
+      )}
     </div>
   );
 }
