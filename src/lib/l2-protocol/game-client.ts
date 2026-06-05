@@ -41,6 +41,10 @@ export interface PlayerState {
   level: number;
   classId: number;
   raceId: number;
+  maxHp?: number;
+  maxMp?: number;
+  cp?: number;
+  maxCp?: number;
 }
 
 /** A world object (NPC / monster) we render as a marker. */
@@ -55,6 +59,20 @@ export interface WorldEntity {
   name?: string; // visible name (players)
   race?: number; // race ordinal (players) — for picking the right model
   female?: boolean;
+  hp?: number; // current HP (from StatusUpdate)
+  maxHp?: number;
+  level?: number;
+  dead?: boolean;
+}
+
+/** One learnable/usable skill from SkillList (0x5F). */
+export interface SkillEntry {
+  id: number;
+  level: number;
+  subLevel: number;
+  passive: boolean;
+  disabled: boolean;
+  enchanted: boolean;
 }
 
 export type GameEvent =
@@ -68,6 +86,15 @@ export type GameEvent =
   | { type: "npc-spawn"; entity: WorldEntity }
   | { type: "npc-move"; objectId: number; x: number; y: number; z: number }
   | { type: "npc-remove"; objectId: number }
+  | { type: "attack"; attackerId: number; targetId: number; damage: number; miss: boolean; crit: boolean }
+  | { type: "status-update"; objectId: number; hp?: number; maxHp?: number; mp?: number; maxMp?: number; cp?: number; maxCp?: number; level?: number }
+  | { type: "die"; objectId: number; isPlayer: boolean }
+  | { type: "target-selected"; objectId: number }
+  | { type: "target-unselected"; objectId: number }
+  | { type: "chat"; channel: number; sender: string; text: string }
+  | { type: "system-message"; text: string }
+  | { type: "skill-list"; skills: SkillEntry[] }
+  | { type: "html"; npcObjId: number; html: string }
   | { type: "error"; error: string }
   | { type: "closed" };
 
@@ -94,6 +121,22 @@ const OP_DELETE_OBJECT = 0x08;
 const OP_MOVE_TO_LOCATION = 0x2f;
 const OP_CHAR_INFO = 0x31; // other players entering broadcast range
 const OP_USER_INFO = 0x32; // our own state/position refresh (mask-based)
+const OP_DIE = 0x00;
+const OP_NPC_HTML = 0x19;
+const OP_ITEM_LIST = 0x11;
+const OP_STATUS_UPDATE = 0x18;
+const OP_TARGET_SELECTED = 0x23;
+const OP_TARGET_UNSELECTED = 0x24;
+const OP_ATTACK = 0x33;
+const OP_SAY2 = 0x4a;
+const OP_SKILL_LIST = 0x5f;
+const OP_SYSTEM_MESSAGE = 0x62;
+const OP_MY_TARGET_SELECTED = 0xb9;
+
+// StatusUpdate field client-ids (Mobius StatusUpdateType).
+const SU_LEVEL = 0x01, SU_CUR_HP = 0x09, SU_MAX_HP = 0x0a, SU_CUR_MP = 0x0b, SU_MAX_MP = 0x0c, SU_CUR_CP = 0x20, SU_MAX_CP = 0x21;
+// SystemMessage param type ids.
+const SM_TYPE_TEXT = 0, SM_TYPE_PLAYER_NAME = 12;
 
 type Phase = "auth" | "roster" | "selecting" | "entering" | "in-world";
 
@@ -129,6 +172,8 @@ export class L2GameClient {
   private listeners = new Set<(ev: GameEvent) => void>();
   private _player: PlayerState | null = null;
   private _entities = new Map<number, WorldEntity>();
+  private _targetId: number | null = null;
+  private _skills: SkillEntry[] = [];
 
   constructor(opts: GameLoginOptions) {
     this.opts = opts;
@@ -183,6 +228,18 @@ export class L2GameClient {
   }
   getEntities(): WorldEntity[] {
     return Array.from(this._entities.values());
+  }
+  getEntity(objectId: number): WorldEntity | undefined {
+    return this._entities.get(objectId);
+  }
+  getTargetId(): number | null {
+    return this._targetId;
+  }
+  getTarget(): WorldEntity | undefined {
+    return this._targetId != null ? this._entities.get(this._targetId) : undefined;
+  }
+  getSkills(): SkillEntry[] {
+    return this._skills;
   }
 
   /** Subscribe to events without clobbering the primary handler. Returns an unsubscribe fn. */
@@ -281,6 +338,16 @@ export class L2GameClient {
         else if (opcode === OP_CHAR_INFO) this.parseCharInfo(body);
         else if (opcode === OP_MOVE_TO_LOCATION) this.parseMoveToLocation(body);
         else if (opcode === OP_DELETE_OBJECT) this.parseDeleteObject(body);
+        else if (opcode === OP_STATUS_UPDATE) this.parseStatusUpdate(body);
+        else if (opcode === OP_ATTACK) this.parseAttack(body);
+        else if (opcode === OP_DIE) this.parseDie(body);
+        else if (opcode === OP_MY_TARGET_SELECTED) this.parseMyTargetSelected(body);
+        else if (opcode === OP_TARGET_SELECTED) this.parseTargetSelected(body);
+        else if (opcode === OP_TARGET_UNSELECTED) this.parseTargetUnselected(body);
+        else if (opcode === OP_SAY2) this.parseSay2(body);
+        else if (opcode === OP_SYSTEM_MESSAGE) this.parseSystemMessage(body);
+        else if (opcode === OP_SKILL_LIST) this.parseSkillList(body);
+        else if (opcode === OP_NPC_HTML) this.parseNpcHtml(body);
       } catch {
         /* one bad packet shouldn't kill the stream */
       }
@@ -646,6 +713,251 @@ export class L2GameClient {
     if (this._entities.delete(objectId)) {
       this.emit({ type: "npc-remove", objectId });
     }
+  }
+
+  // ===== Parsing: combat / status / target / chat / skills =====
+
+  /**
+   * StatusUpdate (0x18): int objectId, int casterId, byte visible, byte count,
+   * then per entry: byte typeId + (long if CUR_HP/MAX_HP else int).
+   * Updates the matching entity/player HP/MP/CP and emits a status-update.
+   */
+  private parseStatusUpdate(body: Uint8Array) {
+    const r = new PacketReader(body);
+    r.u8(); // 0x18
+    const objectId = r.u32();
+    r.u32(); // caster
+    r.u8();  // visible
+    const count = r.u8();
+    const ev: { type: "status-update"; objectId: number; hp?: number; maxHp?: number; mp?: number; maxMp?: number; cp?: number; maxCp?: number; level?: number } = { type: "status-update", objectId };
+    for (let i = 0; i < count; i++) {
+      const t = r.u8();
+      let v: number;
+      if (t === SU_CUR_HP || t === SU_MAX_HP) v = Number(r.u64());
+      else v = r.u32() | 0;
+      if (t === SU_CUR_HP) ev.hp = v;
+      else if (t === SU_MAX_HP) ev.maxHp = v;
+      else if (t === SU_CUR_MP) ev.mp = v;
+      else if (t === SU_MAX_MP) ev.maxMp = v;
+      else if (t === SU_CUR_CP) ev.cp = v;
+      else if (t === SU_MAX_CP) ev.maxCp = v;
+      else if (t === SU_LEVEL) ev.level = v;
+    }
+    // apply to player or entity
+    if (this._player && objectId === this._player.objectId) {
+      const p = this._player;
+      if (ev.hp != null) p.hp = ev.hp;
+      if (ev.maxHp != null) p.maxHp = ev.maxHp;
+      if (ev.mp != null) p.mp = ev.mp;
+      if (ev.maxMp != null) p.maxMp = ev.maxMp;
+      if (ev.cp != null) p.cp = ev.cp;
+      if (ev.maxCp != null) p.maxCp = ev.maxCp;
+      if (ev.level != null) p.level = ev.level;
+      this.emit({ type: "player", player: p });
+    } else {
+      const e = this._entities.get(objectId);
+      if (e) {
+        if (ev.hp != null) e.hp = ev.hp;
+        if (ev.maxHp != null) e.maxHp = ev.maxHp;
+        if (ev.level != null) e.level = ev.level;
+      }
+    }
+    this.emit(ev);
+  }
+
+  /**
+   * Attack (0x33): attackerId, targetId, soulshot, damage, flags, grade,
+   * attacker x/y/z, short extraHits, [extra hits], target x/y/z.
+   * Hit flags: 0x80 = miss, 0x20 = crit (Mobius HITFLAG).
+   */
+  private parseAttack(body: Uint8Array) {
+    const r = new PacketReader(body);
+    r.u8(); // 0x33
+    const attackerId = r.u32();
+    const targetId = r.u32();
+    r.u32(); // soulshot visual
+    const damage = r.u32() | 0;
+    const flags = r.u32() | 0;
+    this.emit({ type: "attack", attackerId, targetId, damage, miss: (flags & 0x80) !== 0, crit: (flags & 0x20) !== 0 });
+  }
+
+  /** Die (0x00): objectId + flags + … . Marks the object dead. */
+  private parseDie(body: Uint8Array) {
+    const r = new PacketReader(body);
+    r.u8(); // 0x00
+    const objectId = r.u32();
+    const isPlayer = this._player != null && objectId === this._player.objectId;
+    const e = this._entities.get(objectId);
+    if (e) { e.dead = true; e.hp = 0; }
+    this.emit({ type: "die", objectId, isPlayer });
+  }
+
+  /** MyTargetSelected (0xB9): int(1) GC, int objectId, short color, int(0). */
+  private parseMyTargetSelected(body: Uint8Array) {
+    const r = new PacketReader(body);
+    r.u8(); // 0xb9
+    r.u32(); // Grand Crusade
+    const objectId = r.u32();
+    this._targetId = objectId;
+    this.emit({ type: "target-selected", objectId });
+  }
+
+  /** TargetSelected (0x23): objectId + x/y/z (target confirmed for the caster). */
+  private parseTargetSelected(body: Uint8Array) {
+    const r = new PacketReader(body);
+    r.u8(); // 0x23
+    r.u32(); // caster
+    const objectId = r.u32();
+    this._targetId = objectId;
+    this.emit({ type: "target-selected", objectId });
+  }
+
+  /** TargetUnselected (0x24): objectId + x/y/z. Clears target. */
+  private parseTargetUnselected(body: Uint8Array) {
+    const r = new PacketReader(body);
+    r.u8(); // 0x24
+    const objectId = r.u32();
+    if (this._targetId === objectId) this._targetId = null;
+    this.emit({ type: "target-unselected", objectId });
+  }
+
+  /**
+   * Say2 / CreatureSay (0x4A): senderObjId, chatType, senderName(str),
+   * messageId(int), text(str). Trailing rank bytes ignored.
+   */
+  private parseSay2(body: Uint8Array) {
+    const r = new PacketReader(body);
+    r.u8(); // 0x4a
+    r.u32(); // sender objId
+    const channel = r.u32() | 0;
+    const sender = r.str();
+    const messageId = r.u32() | 0;
+    let text = "";
+    if (messageId === -1 >>> 0 || messageId === 0xffffffff || messageId === 0) {
+      // normal chat carries an explicit string
+      if (r.remaining > 1) text = r.str();
+    } else if (r.remaining > 1) {
+      text = r.str();
+    }
+    if (text) this.emit({ type: "chat", channel, sender, text });
+  }
+
+  /**
+   * SystemMessage (0x62): short msgId, byte paramCount, typed params.
+   * We can't render the full SysMsg string table, so we extract any string
+   * params (player names / free text) and surface those.
+   */
+  private parseSystemMessage(body: Uint8Array) {
+    const r = new PacketReader(body);
+    r.u8(); // 0x62
+    r.u16(); // msgId
+    const count = r.u8();
+    const parts: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const t = r.u8();
+      switch (t) {
+        case SM_TYPE_TEXT:
+        case SM_TYPE_PLAYER_NAME:
+          parts.push(r.str());
+          break;
+        case 9: case 20: case 24: // element/byte/faction => byte
+          r.u8();
+          break;
+        case 5: case 10: case 13: case 15: // castle/instance/sysstr/classId => short
+          r.u16();
+          break;
+        case 1: case 2: case 3: case 11: // int / npc / item / door => int
+          r.u32();
+          break;
+        case 6: // long
+          r.u64();
+          break;
+        case 4: // skill name => int + short + short
+          r.u32(); r.u16(); r.u16();
+          break;
+        case 7: case 16: // zone / popup => 3 ints
+          r.u32(); r.u32(); r.u32();
+          break;
+        default:
+          // unknown param type — stop to avoid desync
+          i = count;
+          break;
+      }
+    }
+    const text = parts.filter(Boolean).join(" ");
+    if (text) this.emit({ type: "system-message", text });
+  }
+
+  /**
+   * SkillList (0x5F): int count, per skill: int passive, short level,
+   * short subLevel, int id, int reuseGroup, byte disabled, byte enchant.
+   * Trailing int lastLearnedSkillId.
+   */
+  private parseSkillList(body: Uint8Array) {
+    const r = new PacketReader(body);
+    r.u8(); // 0x5f
+    const count = r.u32() | 0;
+    if (count < 0 || count > 5000) return;
+    const skills: SkillEntry[] = [];
+    for (let i = 0; i < count; i++) {
+      const passive = (r.u32() | 0) !== 0;
+      const level = r.u16();
+      const subLevel = r.u16();
+      const id = r.u32() | 0;
+      r.u32(); // reuse group
+      const disabled = r.u8() !== 0;
+      const enchanted = r.u8() !== 0;
+      skills.push({ id, level, subLevel, passive, disabled, enchanted });
+    }
+    this._skills = skills;
+    this.emit({ type: "skill-list", skills });
+  }
+
+  /**
+   * NpcHtmlMessage (0x19): int npcObjId, string html, int itemId, int sound, byte size.
+   * This is how the server delivers NPC dialogs AND the GM/admin panels.
+   */
+  private parseNpcHtml(body: Uint8Array) {
+    const r = new PacketReader(body);
+    r.u8(); // 0x19
+    const npcObjId = r.u32();
+    const html = r.str();
+    if (html) this.emit({ type: "html", npcObjId, html });
+  }
+
+  // ===== target/skill/admin action senders =====
+
+  /** Use a skill on the current target (RequestMagicSkillUse 0x39). */
+  sendUseSkill(skillId: number, ctrl = false, shift = false) {
+    if (!this.connected) return;
+    const body = new PacketWriter()
+      .u8(0x39)
+      .u32(skillId)
+      .u32(ctrl ? 1 : 0)
+      .u8(shift ? 1 : 0)
+      .build();
+    this.sendFrame(body, this.useEncryption);
+  }
+
+  /**
+   * RequestBypassToServer (0x23): send an HTML-link bypass or an admin command.
+   * The L2 client maps a typed "//cmd args" to the bypass "admin_cmd args".
+   */
+  sendBypass(command: string) {
+    if (!this.connected || !command) return;
+    const body = new PacketWriter().u8(0x23).str(command).build();
+    this.sendFrame(body, this.useEncryption);
+  }
+
+  /** Convenience: send a chat line OR route "//x" admin commands as bypass. */
+  sendChatOrCommand(text: string, channel = 0) {
+    if (!text) return;
+    if (text.startsWith("//")) {
+      this.sendBypass("admin_" + text.slice(2));
+      return true; // handled as admin command
+    }
+    this.sendSay(text, channel);
+    return false;
   }
 }
 
