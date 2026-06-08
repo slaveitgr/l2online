@@ -11,8 +11,9 @@
  * so it scales to any window while keeping the exact proportions of the original.
  */
 import type { ReactNode, CSSProperties } from "react";
+import charSelectBgAsset from "@/assets/charselect-bg.png.asset.json";
 
-const BG = "/hud/screens/CharSelect.png"; // real Aden cathedral background
+const BG = charSelectBgAsset.url; // Aden city background (CDN asset)
 
 export interface CharSlot {
   name: string;
@@ -160,7 +161,7 @@ export function L2CharSelectScreen({
               {/* XP */}
               <div style={{ display: "grid", gridTemplateColumns: "1.6vw 1fr", alignItems: "center", columnGap: "0.3vw", height: "1.0vw", marginBottom: "0.35vh" }}>
                 <span style={{ fontSize: "0.68vw" }}>XP</span>
-                <Bar color="#8e54c4" value={`${(cur.expPercent ?? 0).toFixed(4)}%`} label />
+                <Bar color="#8e54c4" value={`${(cur.expPercent ?? 0).toFixed(4)}%`} label="XP" />
               </div>
               {/* SP / Rep */}
               <div style={{ display: "grid", gridTemplateColumns: "1.6vw 1fr auto auto", alignItems: "center", columnGap: "0.5vw", fontSize: "0.68vw" }}>
