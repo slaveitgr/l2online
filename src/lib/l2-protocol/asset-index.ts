@@ -141,7 +141,17 @@ export async function findObjectsByClass(klass: string): Promise<ObjectEntry[]> 
   return idx.byClass.get(klass.toLowerCase()) ?? [];
 }
 
-/** Candidate texture packages for an itemId (armor/weapon texture lookup, S7). */
+/**
+ * Canonical: resolve a UE2 object name to its candidate package paths,
+ * via the jsonl index. This is the correct lookup for meshes/textures
+ * once you know the asset name (S3, S6, S7-step-2).
+ */
+export async function resolvePackageForObject(name: string): Promise<string[]> {
+  const hits = await findObjectPackages(name);
+  return hits.map(h => h.package);
+}
+
+/** Auxiliary itemId → candidate texture packages (objindex.json). */
 export async function findItemTexturePackages(itemId: number): Promise<string[]> {
   const idx = await loadItemTextureIndex();
   return idx.get(itemId) ?? [];
