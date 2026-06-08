@@ -21,6 +21,7 @@ import {
   getSelectedTarget,
   setSelectedTarget,
 } from "@/lib/game-state";
+import { prefetchAssetIndexes } from "@/lib/l2-protocol/asset-index";
 
 export const Route = createFileRoute("/world")({
   head: () => ({
@@ -77,6 +78,10 @@ function WorldPage() {
       navigate({ to: initial ? "/characters" : "/" });
       return;
     }
+
+    // Warm the S12 asset indexes once we're in-world. Background fetch.
+    prefetchAssetIndexes();
+
 
     if (initial) {
       setChar({
