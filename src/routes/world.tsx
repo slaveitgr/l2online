@@ -79,6 +79,10 @@ function WorldPage() {
       return;
     }
 
+    // Warm the S12 asset indexes once we're in-world. Background fetch.
+    prefetchAssetIndexes();
+
+
     if (initial) {
       setChar({
         name: initial.name,
