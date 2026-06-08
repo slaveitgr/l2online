@@ -21,6 +21,7 @@ import {
   getSelectedTarget,
   setSelectedTarget,
 } from "@/lib/game-state";
+import { prefetchAssetIndexes } from "@/lib/l2-protocol/asset-index";
 
 export const Route = createFileRoute("/world")({
   head: () => ({
