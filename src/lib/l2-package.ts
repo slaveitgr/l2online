@@ -196,12 +196,19 @@ export class L2Package {
     const b = this.bytes;
     let o = nameOffset;
     for (let i = 0; i < nameCount; i++) {
-      const [len, s] = readCompat32(b, o);
+      const [rawLen, s] = readCompat32(b, o);
       o += s;
       let nm = "";
-      if (len > 0) {
-        for (let c = 0; c < len - 1; c++) nm += String.fromCharCode(b[o + c]);
-        o += len;
+      if (rawLen < 0) {
+        // ver133/lic40 .ukx: UTF-16LE, |rawLen| code units (NUL included)
+        const len = -rawLen;
+        for (let c = 0; c < len - 1; c++) {
+          nm += String.fromCharCode(b[o + c * 2] | (b[o + c * 2 + 1] << 8));
+        }
+        o += len * 2;
+      } else if (rawLen > 0) {
+        for (let c = 0; c < rawLen - 1; c++) nm += String.fromCharCode(b[o + c]);
+        o += rawLen;
       }
       const flags = dv.getUint32(o, true);
       o += 4;
