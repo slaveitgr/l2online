@@ -1,69 +1,93 @@
+# Plan: S3 Mesh Worker + Asset Index Corrections
 
-## Στόχος
-1. Βάλε την ανεβασμένη `image-bg.png` (Aden city) ως background στο Character Select.
-2. Υλοποίηση όλων των ενοτήτων 3–18 του `Webclient_Port_Spec` σε φάσεις (αντί για ένα τεράστιο commit), με typed modules + worker decoding + IndexedDB cache.
+Ο Claude έχει δίκιο σε δύο σημεία. Πάμε να τα φτιάξουμε πρώτα, μετά γράφουμε τον S3 mesh worker.
 
----
+## 1. Διόρθωση asset-index (objindex semantics)
 
-## Φάση 0 — Char Select background (γρήγορο, single-step)
-- Upload `image-bg.png` ως Lovable Asset → `src/assets/charselect-bg.png.asset.json`.
-- `src/components/hud/L2CharSelectScreen.tsx`: αντικατάσταση του `const BG = "/hud/screens/CharSelect.png"` με import του asset url. Κράτα `cover`/`center` fit.
+Το `l2slave_objindex.json` είναι **objectName → packages**, όχι itemId → textures. Η σωστή αλυσίδα για armor (S7):
 
----
+```text
+itemId
+  └─(Armorgrp.dat, section 7)─▶ mesh/texture name (π.χ. Fmagic_m031_u)
+        └─(objindex)──────────▶ .ukx / .utx package
+              └─(package open)─▶ export
+```
 
-## Φάση 1 — Foundations (sections 11, 12, 18)
-Πρώτα τα cross-cutting, χωρίς αυτά τα επόμενα φέρνουν λευκά/αργά μοντέλα.
-- **S11 Texture fallbacks** σε `src/lib/l2-assets.ts`: exact → `_ori` → startsWith → follow `Shader.Diffuse`.
-- **S12 Asset index**: φόρτωσε `public/l2slave_index.jsonl` + `l2slave_objindex.json` (αν λείπουν, build από headers) → `src/lib/l2-asset-index.ts` με `lookup(object) → package`.
-- **S18 Cache**: `src/lib/l2-cache.ts` (IndexedDB, key `name+size+CACHE_VERSION`) + `public/sw.js` Cache API για raw `.utx/.unr/.dat`. Worker pool + LRU 2 GB.
+Αλλαγές στο `src/lib/l2-protocol/asset-index.ts`:
 
-## Φάση 2 — Mesh/Texture pipeline (section 3)
-- `src/workers/l2-mesh.worker.ts`: SkeletalMesh chain scan (pts→wedges→faces→influences), refskeleton scan.
-- `src/workers/l2-texture.worker.ts`: parse `utx` props (Format/USize/VSize/Palette), top-mip locate· DXT → `THREE.CompressedTexture`, P8 → CPU palette decode.
-- UE2→three convert helper (already partially in repo) — single source of truth.
+- Μετονομασία `loadItemTextureIndex()` → `loadObjectPackageIndex()` και `findItemTexturePackages(itemId)` → `resolvePackageForObject(name)`. Επιστρέφει `string[]` (candidate packages) για ένα objectName.
+- Διατήρηση των υπόλοιπων (`loadPackageIndex`, `findObjectPackages`, `findPackage`, `findObjectsByClass`, `prefetchAssetIndexes`, `clearAssetIndex`).
+- Προσθήκη placeholder `armorgrp-resolver.ts` (κενό S7 stub) με υπογραφή `getArmorAssetName(itemId, slot) => string | null` που θα γεμίσει στο S7 όταν φορτώσουμε το Armorgrp.dat.
 
-## Φάση 3 — Char Select 1:1 (section 15) ← εκεί κουμπώνει το νέο bg
-- Parse `CharSelectionInfo (0x09)` paperdoll με raw ids (ήδη γίνεται partial — επιβεβαίωση).
-- 3D preview pawn (race/sex) + armor (S7 stub αρχικά) + weapon στο `Weapon_R_Bone`, variant culling regex `_m(\d{3})_..._([a-z]+)\.mo`.
-- Camera close-up (~3m, h 1.15m), pawn left-shift, lookAt camera· backdrop quad παιδί κάμερας με το νέο Aden bg.
+## 2. S3 — Skeletal Mesh Worker
 
-## Φάση 4 — Equipment & NPCs (sections 6, 7)
-- **S7 Armor**: `Armorgrp.dat` lookup, bodyPrefix matching `_m###_[uglb]` + `_t###`, auto-calibration 48 perms × quat variants × 4 scales, top-2 skin weights, hide naked slot, 3s re-assert watchdog.
-- **S6 NPC**: `Npcgrp.dat` → mesh+tex resolution, package alias map (`LineageMonster→LineageMonsters.ukx`), `NpcName-eu.dat` names. Hooks στον `npc-info` handler.
+Νέα αρχεία:
 
-## Φάση 5 — World (sections 8, 9, 10)
-- **S8 Maps**: `.unr` StaticMeshActor parser (Location/Rotation/DrawScale/StaticMesh ref) → `.usx` stream layout. Terrain: `TerrainInfo` (TerrainMap G16, layers, sectors, toWorld FCoords, heightmap, QuadVisibilityBitmap holes). Sector streaming με 3×3 ring, key `20+floor(x/32768)_18+floor(y/32768)`.
-- **S9 Materials**: FinalBlend/Shader/TexPanner chain → three material flags (Masked/Translucent/Additive, TwoSided, emissive, animated UV).
-- **S10 Server-authoritative movement**: MoveTo origin = `player.x/y/z` από τελευταίο `MoveToLocation` echo, grounding με ±3m server-z match, ποτέ Water plane.
+- `src/lib/l2-protocol/workers/mesh-worker.ts` — Web Worker (module type).
+- `src/lib/l2-protocol/mesh-worker-client.ts` — main-thread client με Promise API.
+- `src/lib/l2-protocol/ukx/` — pure decoders (καμία DOM/three εξάρτηση):
+  - `name-table.ts` — compact32 + SIGN-bit UTF-16LE / ASCII branch (ver133/lic40).
+  - `lazy-array-scan.ts` — chained scan: `pts(12) → wedges(10) → faces(12)` βάσει `skipOffset == nextStart`. Όχι full property parse.
+  - `skeletal-mesh.ts` — orchestrator: package → export → geometry buffers.
+  - `coord.ts` — `(x,y,z) → (x,z,y)`, scale `1/52.5`, winding flip helper (swap index `[i+1]` με `[i+2]`).
 
-## Φάση 6 — Other players & Combat (sections 4, 5, 14)
-- **S4 CharInfo 0x31** parser → spawn other-player pawn, paperdoll dressing, MoveToLocation κίνηση. Patch `src/lib/l2-protocol/game-client.ts`.
-- **S5 Combat**: parse Attack 0x33 / MyTargetSelected 0xB9 / Die 0x00· send Action 0x1F / AttackRequest 0x01· click λογική (1st=select, 2nd=attack, Ctrl=force, Shift=info) στο `WorldViewport`.
-- **S14 Unknown-opcode logger**: log first occurrence (UserInfo 0x32, NpcInfo 0x21 variants, status/skill).
+### Κρίσιμα σημεία (από Claude)
 
-## Φάση 7 — UI & Admin (sections 13, 17)
-- **S13 NpcHtml 0x19** queue: αν δεν είναι έτοιμο το HTML window, ξαναπροσπάθησε ~60s.
-- **S17 Admin**: typed `//cmd` → `SendBypassBuildCmd 0x74`, link clicks → `RequestBypassToServer 0x23`. HTML link parsing μέσα στο `NpcDialog`.
+1. **Name table ver133/lic40**: διάβασε compact32 length· αν `SIGN bit` set → UTF-16LE (`len * 2` bytes), αλλιώς ASCII (`len` bytes). Χωρίς αυτό σπάει όλο το name table.
+2. **Geometry = lazy-array chain scan**, όχι property reflection. Detect by `skipOffset == nextStart`, σειρά `pts(12B) / wedges(10B) / faces(12B)`.
+3. **Coords**: `(x,y,z) → (x,z,y)` + winding flip. **DXT απευθείας** ως `THREE.CompressedTexture` (DXT1/3/5) — καμία RGBA αποκωδικοποίηση.
 
-## Φάση 8 — Animations (section 16, hardest)
-- `MeshAnimation` parser ver133/lic40 (refBones, motions, FAnalogTrack quat/pos/time tracks, sequences με resync heuristic).
-- Runtime skeleton bind + per-frame slerp localRotations. Anim packages per category (Magic.ukx, Fighter.ukx, LineageMonsters*/NPCs*).
+### Worker contract (transferable)
 
----
+Request:
+```ts
+{ kind: 'decode-mesh', packageBytes: ArrayBuffer, exportName: string, opts?: { flipWinding: boolean } }
+```
 
-## Τεχνικές σημειώσεις
-- Όλα τα heavy decodes σε Web Workers (mesh, texture, dat, animation).
-- Όλα τα new modules typed (`Mesh`, `RefBone`, `MotionChunk`, `Armor`, `NpcEntry`, `Sector`).
-- UE2→three: pos `(x,y,z)→(x,z,y)`, αναστροφή winding, scale `1/52.5` — single helper.
-- Coordinate sanity για κάθε νέο asset class.
+Response (transfer όλα τα buffers):
+```ts
+{
+  ok: true,
+  positions: Float32Array,   // (x,z,y) scaled
+  normals:   Float32Array,
+  uvs:       Float32Array,
+  indices:   Uint32Array,    // winding-flipped
+  bones?:    { names: string[], parents: Int16Array, bindPose: Float32Array },
+  skin?:     { jointIndices: Uint16Array, weights: Float32Array },
+  materials: Array<{ slot: number, textureRef: string | null }>
+}
+```
 
----
+Main thread: `postMessage(req, [packageBytes])`, στο response `transfer` όλα τα typed arrays πίσω. Έτσι μηδέν blocking στο main.
 
-## Παράδοση
-- Φάση 0 ταυτόχρονα με την έγκριση (single small commit).
-- Κάθε επόμενη φάση = χωριστό σύνολο αλλαγών, με σύντομο smoke test (login → char select → enter world) στο τέλος.
-- Στο τέλος κάθε φάσης update στο `.lovable/plan.md` με τι κουμπώθηκε.
+### Texture handoff (για S15)
 
-## Ερωτήσεις πριν το build
-1. Να ξεκινήσουμε όντως ΟΛΕΣ τις φάσεις σειριακά (μεγάλο scope, πολλά credits) ή Φάση 0 + Φάση 1 τώρα και οι υπόλοιπες με ξεχωριστό «go» η κάθε μία;
-2. Τα `l2slave_index.jsonl` / `l2slave_objindex.json` υπάρχουν ήδη να σερβιριστούν, ή να τα παράγουμε από headers στον client την πρώτη φορά;
+`mesh-worker-client.ts` ΔΕΝ ασχολείται με textures. Επιστρέφει `materials[].textureRef` (objectName). Ο consumer (S15 preview) τρέχει `resolvePackageForObject` και φορτώνει το `.utx` ξεχωριστά, decode DXT → `CompressedTexture` στο main thread (μικρή δουλειά, GPU upload).
+
+## 3. Test case scaffolding
+
+Νέο `src/lib/l2-protocol/ukx/__tests__/mesh-decoder.fixture.ts` placeholder — περιμένουμε από Claude συγκεκριμένο objectName + expected verts/tris counts για smoke test. Θα προστεθεί όταν έρθει το fixture.
+
+## Out of scope σε αυτό το step
+
+- S7 Armorgrp.dat parser (μόνο stub).
+- S15 char-select 3D preview (επόμενο step, καταναλώνει τον worker).
+- Animation tracks (S16) — ο worker τώρα βγάζει μόνο bind pose.
+
+## Files
+
+Edited:
+- `src/lib/l2-protocol/asset-index.ts` (rename helpers, no behavior regression για τα υπόλοιπα consumers)
+- `src/routes/world.tsx` (αν χρειαστεί ονομαστική αλλαγή στο prefetch — αλλιώς άθικτο)
+
+Created:
+- `src/lib/l2-protocol/armorgrp-resolver.ts` (stub)
+- `src/lib/l2-protocol/workers/mesh-worker.ts`
+- `src/lib/l2-protocol/mesh-worker-client.ts`
+- `src/lib/l2-protocol/ukx/name-table.ts`
+- `src/lib/l2-protocol/ukx/lazy-array-scan.ts`
+- `src/lib/l2-protocol/ukx/skeletal-mesh.ts`
+- `src/lib/l2-protocol/ukx/coord.ts`
+- `src/lib/l2-protocol/ukx/__tests__/mesh-decoder.fixture.ts`
+
+Μόλις εγκρίνεις, πάω σε build mode και τα γράφω. Αν έχεις ήδη το test case object name από Claude, στείλ' το για να μπει κατευθείαν στο fixture.
