@@ -1,19 +1,16 @@
 /**
  * S12 — Asset index loader.
  *
- * Two CDN-hosted indexes (uploaded by the user, served as Lovable assets):
+ *   l2slave_index.jsonl  — AUTHORITATIVE objectName → package mapping
+ *     (byObject), plus package metadata (byPackage) and class index
+ *     (byClass). Use resolvePackageForObject(name) for the canonical
+ *     "object name → .ukx/.utx package" lookup (S7 armor chain step 2,
+ *     S3 mesh load, S6 NPC mesh load).
  *
- *   l2slave_index.jsonl  — one JSON record per package:
- *     { path, crypto, ver, lic, size, names, exports,
- *       classes: { ClassName: count }, objs: [[objName, klass, size], ...] }
- *     → produces  objectName.toLowerCase() → string[]  (package paths)
- *                 packagePath.toLowerCase() → PackageMeta
- *
- *   l2slave_objindex.json — { itemId: ["LineageX.utx", ...] }
- *     → produces  itemId(number) → string[]   (candidate texture packages)
- *
- * Both files are large (≈10 MB + ≈54 MB). Each is lazy-fetched on first
- * lookup; parse results are kept in memory (LRU not needed — they fit).
+ *   l2slave_objindex.json — auxiliary { itemId: ["LineageX.utx", ...] }.
+ *     NOT the primary resolver. Correct armor chain is:
+ *       itemId → Armorgrp.dat (sect.7) → meshName
+ *              → resolvePackageForObject(meshName) → package.
  */
 
 import objindexAsset from "@/assets/l2slave_objindex.json.asset.json";
