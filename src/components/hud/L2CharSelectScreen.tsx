@@ -11,8 +11,9 @@
  * so it scales to any window while keeping the exact proportions of the original.
  */
 import type { ReactNode, CSSProperties } from "react";
+import charSelectBgAsset from "@/assets/charselect-bg.png.asset.json";
 
-const BG = "/hud/screens/CharSelect.png"; // real Aden cathedral background
+const BG = charSelectBgAsset.url; // Aden city background (CDN asset)
 
 export interface CharSlot {
   name: string;
