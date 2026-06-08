@@ -15,6 +15,7 @@
 import { GameCrypt } from "./game-crypt";
 import { classNameOf, raceNameOf } from "./classes";
 import { PacketReader, PacketWriter } from "./packets";
+import { logUnknownOpcode } from "./unknown-opcode-log";
 
 export interface GameCharacter {
   id: string; // objectId as hex
@@ -348,6 +349,11 @@ export class L2GameClient {
         else if (opcode === OP_SYSTEM_MESSAGE) this.parseSystemMessage(body);
         else if (opcode === OP_SKILL_LIST) this.parseSkillList(body);
         else if (opcode === OP_NPC_HTML) this.parseNpcHtml(body);
+        else {
+          // S14: log first occurrence of unknown world-phase opcodes
+          // so we can chart unmapped packets (UserInfo 0x32, NpcInfo variants, etc.).
+          logUnknownOpcode(opcode, body.length, (msg: string) => this.emit({ type: "status", message: msg }));
+        }
       } catch {
         /* one bad packet shouldn't kill the stream */
       }
