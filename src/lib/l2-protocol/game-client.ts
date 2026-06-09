@@ -49,6 +49,9 @@ export interface PlayerState {
 }
 
 /** A world object (NPC / monster) we render as a marker. */
+export type PaperdollSlot =
+  | "rhand" | "lhand" | "gloves" | "chest" | "legs" | "feet" | "head" | "cloak";
+
 export interface WorldEntity {
   objectId: number;
   displayId: number; // npc template id (displayId - 1000000)
@@ -60,6 +63,8 @@ export interface WorldEntity {
   name?: string; // visible name (players)
   race?: number; // race ordinal (players) — for picking the right model
   female?: boolean;
+  classId?: number; // player class — drives model/animation set (S15/S7)
+  equip?: Partial<Record<PaperdollSlot, number>>; // non-zero paperdoll item ids
   hp?: number; // current HP (from StatusUpdate)
   maxHp?: number;
   level?: number;
@@ -530,6 +535,12 @@ export class L2GameClient {
   }
 
   sendAttack(objectId: number) {
+    // shift=0 → normal attack/interact. shift=1 = info window (see sendInspect).
+    this.sendAction(objectId, false);
+  }
+
+  sendInspect(objectId: number) {
+    // Action with shift=1 → server opens the info/character window.
     this.sendAction(objectId, true);
   }
 
@@ -680,8 +691,42 @@ export class L2GameClient {
     const name = r.str();
     const race = r.u16();
     const female = r.u8() !== 0;
-    // (classId + paperdoll follow — not needed for placement)
-    const entity: WorldEntity = { objectId, displayId: -1, x, y, z, heading: 0, isPlayer: true, name, race, female };
+
+    // classId + paperdoll (best-effort; trailing aug/enchant arrays vary by build).
+    let classId: number | undefined;
+    let equip: WorldEntity["equip"];
+    try {
+      classId = r.u32();
+      r.u32(); // class-id-2 / pad (Grand Crusade reveal)
+      // Paperdoll slot ids (u32 each), full L2 order. We only keep the
+      // slots that drive rendering today; rest are read to keep alignment.
+      const slotOrder = [
+        "_under", "_rear", "_lear", "_neck",
+        "_rfinger", "_lfinger",
+        "head", "rhand", "lhand", "gloves", "chest", "legs", "feet", "cloak",
+        "_lrhand", "_hair", "_hair2",
+        "_rbracelet", "_lbracelet",
+        "_t1", "_t2", "_t3", "_t4", "_t5", "_t6",
+        "_belt",
+      ] as const;
+      const out: NonNullable<WorldEntity["equip"]> = {};
+      for (const slot of slotOrder) {
+        const id = r.u32();
+        if (id && !slot.startsWith("_")) {
+          (out as Record<string, number>)[slot] = id;
+        }
+      }
+      if (Object.keys(out).length) equip = out;
+    } catch {
+      // Body shorter than expected — keep whatever we got so far.
+    }
+
+    const entity: WorldEntity = {
+      objectId, displayId: -1, x, y, z, heading: 0,
+      isPlayer: true, name, race, female,
+      ...(classId !== undefined ? { classId } : {}),
+      ...(equip ? { equip } : {}),
+    };
     this._entities.set(objectId, entity);
     this.emit({ type: "npc-spawn", entity });
   }
