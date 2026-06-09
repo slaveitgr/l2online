@@ -49,6 +49,10 @@ export type PaperdollSlot =
 
 export interface CharacterModelHandle {
   group: THREE.Group;
+  /** Inner (mesh-local, z-up) group — animators rotate child parts here. */
+  inner?: THREE.Group;
+  /** Body parts keyed by their original mesh-local name, in attach order. */
+  bodyParts?: Array<{ name: string; mesh: THREE.Mesh }>;
   dispose: () => void;
 }
 
