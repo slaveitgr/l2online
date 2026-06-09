@@ -535,6 +535,12 @@ export class L2GameClient {
   }
 
   sendAttack(objectId: number) {
+    // shift=0 → normal attack/interact. shift=1 = info window (see sendInspect).
+    this.sendAction(objectId, false);
+  }
+
+  sendInspect(objectId: number) {
+    // Action with shift=1 → server opens the info/character window.
     this.sendAction(objectId, true);
   }
 
