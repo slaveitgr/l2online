@@ -141,6 +141,7 @@ const OP_SAY2 = 0x4a;
 const OP_SKILL_LIST = 0x5f;
 const OP_SYSTEM_MESSAGE = 0x62;
 const OP_MY_TARGET_SELECTED = 0xb9;
+const OP_TELEPORT_TO_LOCATION = 0x28;
 
 // StatusUpdate field client-ids (Mobius StatusUpdateType).
 const SU_LEVEL = 0x01, SU_CUR_HP = 0x09, SU_MAX_HP = 0x0a, SU_CUR_MP = 0x0b, SU_MAX_MP = 0x0c, SU_CUR_CP = 0x20, SU_MAX_CP = 0x21;
@@ -357,6 +358,7 @@ export class L2GameClient {
         else if (opcode === OP_SYSTEM_MESSAGE) this.parseSystemMessage(body);
         else if (opcode === OP_SKILL_LIST) this.parseSkillList(body);
         else if (opcode === OP_NPC_HTML) this.parseNpcHtml(body);
+        else if (opcode === OP_TELEPORT_TO_LOCATION) this.parseTeleportToLocation(body);
         else {
           // S14: log first occurrence of unknown world-phase opcodes
           // so we can chart unmapped packets (UserInfo 0x32, NpcInfo variants, etc.).
@@ -520,6 +522,44 @@ export class L2GameClient {
     this.sendFrame(body, this.useEncryption);
     // Optimistically advance our own origin so the next move's source is correct.
     if (this._player) { this._player.x = x; this._player.y = y; this._player.z = z; }
+  }
+
+  /** Tell server we finished a teleport / spawn appearance. Opcode 0x30, no body. */
+  sendAppearing() {
+    if (!this.connected) return;
+    const body = new PacketWriter().u8(0x30).build();
+    this.sendFrame(body, this.useEncryption);
+    this.emit({ type: "status", message: "[GS] → Appearing (0x30) post-teleport" });
+  }
+
+  private parseTeleportToLocation(body: Uint8Array) {
+    // [op u8][objectId u32][x i32][y i32][z i32][heading i32]
+    if (body.length < 1 + 4 * 5) return;
+    const r = new PacketReader(body);
+    r.u8();
+    const objectId = r.u32();
+    const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+    const x = view.getInt32(5, true);
+    const y = view.getInt32(9, true);
+    const z = view.getInt32(13, true);
+    const heading = view.getInt32(17, true);
+    this.emit({
+      type: "status",
+      message: `[GS] TeleportToLocation oid=${objectId} → ${x},${y},${z} h=${heading}`,
+    });
+    if (this._player && objectId === this._player.objectId) {
+      this._player.x = x;
+      this._player.y = y;
+      this._player.z = z;
+      // Drop all known entities — server will re-broadcast them after Appearing.
+      for (const oid of Array.from(this._entities.keys())) {
+        this._entities.delete(oid);
+        this.emit({ type: "npc-remove", objectId: oid });
+      }
+      this.emit({ type: "player", player: this._player });
+      // ACK: server gates further NpcInfo/CharInfo on this packet.
+      this.sendAppearing();
+    }
   }
 
   sendAction(objectId: number, shift = false) {
