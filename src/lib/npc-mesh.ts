@@ -187,6 +187,15 @@ export async function loadNpcMesh(meshFullName: string, opts: { targetHeight?: n
   return { group: wrap, dispose: () => disposables.forEach((d) => d.dispose()) };
 }
 
+/** True iff the given mesh's package bundle is known to be missing on the server.
+ *  The caller can use this to decide whether to permanently skip an NPC or keep
+ *  retrying (e.g., never permanently mark — bundle may ship later). */
+export function isNpcPkgKnownMissing(meshFullName: string): boolean {
+  const dot = meshFullName.indexOf(".");
+  if (dot < 0) return false;
+  return _missingPkgs.has(resolveActualName(meshFullName.slice(0, dot)));
+}
+
 /** Derive a human-ish display name from a mesh export ("LineageMonsters.gremlin_m00" → "Gremlin"). */
 export function prettyNpcName(meshFullName: string | undefined, fallback: string): string {
   if (!meshFullName) return fallback;
