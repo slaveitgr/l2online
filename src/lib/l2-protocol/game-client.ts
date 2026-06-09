@@ -141,6 +141,7 @@ const OP_SAY2 = 0x4a;
 const OP_SKILL_LIST = 0x5f;
 const OP_SYSTEM_MESSAGE = 0x62;
 const OP_MY_TARGET_SELECTED = 0xb9;
+const OP_TELEPORT_TO_LOCATION = 0x28;
 
 // StatusUpdate field client-ids (Mobius StatusUpdateType).
 const SU_LEVEL = 0x01, SU_CUR_HP = 0x09, SU_MAX_HP = 0x0a, SU_CUR_MP = 0x0b, SU_MAX_MP = 0x0c, SU_CUR_CP = 0x20, SU_MAX_CP = 0x21;
