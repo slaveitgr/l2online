@@ -49,6 +49,9 @@ export interface PlayerState {
 }
 
 /** A world object (NPC / monster) we render as a marker. */
+export type PaperdollSlot =
+  | "rhand" | "lhand" | "gloves" | "chest" | "legs" | "feet" | "head" | "cloak";
+
 export interface WorldEntity {
   objectId: number;
   displayId: number; // npc template id (displayId - 1000000)
@@ -60,6 +63,8 @@ export interface WorldEntity {
   name?: string; // visible name (players)
   race?: number; // race ordinal (players) — for picking the right model
   female?: boolean;
+  classId?: number; // player class — drives model/animation set (S15/S7)
+  equip?: Partial<Record<PaperdollSlot, number>>; // non-zero paperdoll item ids
   hp?: number; // current HP (from StatusUpdate)
   maxHp?: number;
   level?: number;
