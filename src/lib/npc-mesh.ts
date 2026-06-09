@@ -112,6 +112,22 @@ export function npcMeshInfoSync(displayId: number): { m: string; t?: string[] } 
 /** PNG filename for a texture full-name (must match l2-extract-npc-textures.mjs). */
 function texFile(full: string): string { return full.replace(/[^A-Za-z0-9]+/g, "_") + ".png"; }
 
+/** Find the best matching mesh entry inside an extracted package bundle.
+ *  Priority: exact → "<obj>_m00" → largest export that startsWith(<obj>). */
+function pickEntry(pkg: Pkg, exportName: string): { name: string; entry: MeshEntry } | null {
+  if (pkg[exportName]) return { name: exportName, entry: pkg[exportName] };
+  const m00 = `${exportName}_m00`;
+  if (pkg[m00]) return { name: m00, entry: pkg[m00] };
+  const lc = exportName.toLowerCase();
+  let best: { name: string; entry: MeshEntry; verts: number } | null = null;
+  for (const [name, entry] of Object.entries(pkg)) {
+    if (!name.toLowerCase().startsWith(lc)) continue;
+    const verts = entry.parts?.reduce((s, p) => s + (p.positions?.length ?? 0), 0) ?? 0;
+    if (!best || verts > best.verts) best = { name, entry, verts };
+  }
+  return best ? { name: best.name, entry: best.entry } : null;
+}
+
 /** Build a renderable group for a "Pkg.export" mesh name, or null if unavailable. */
 export async function loadNpcMesh(meshFullName: string, opts: { targetHeight?: number; texName?: string } = {}): Promise<NpcMeshHandle | null> {
   const dot = meshFullName.indexOf(".");
@@ -119,8 +135,10 @@ export async function loadNpcMesh(meshFullName: string, opts: { targetHeight?: n
   const pkgName = meshFullName.slice(0, dot);
   const exportName = meshFullName.slice(dot + 1);
   const pkg = await loadPkg(pkgName);
-  const entry = pkg?.[exportName];
-  if (!entry) return null;
+  if (!pkg) return null;
+  const found = pickEntry(pkg, exportName);
+  if (!found) return null;
+  const entry = found.entry;
 
   const group = new THREE.Group();
   group.name = `Npc:${meshFullName}`;
