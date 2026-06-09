@@ -16,7 +16,16 @@ const ROOT = join(__dir, "..");
 const ANIM = "/sessions/optimistic-focused-wozniak/mnt/L2Slave/Animations";
 const OUTDIR = join(ROOT, "public", "models", "npc", "pkg");
 
-const TOWN = ["LineageNPCs", "LineageNPCs2", "LineageNPCs3", "LineageNPCs4", "LineageNPCs5", "LineageNpcsEV", "LineageNPCsEV", "LineageNpcs"];
+// Default: extract every Lineage NPC/Monster package referenced by the map.
+// (Pass explicit names on argv to extract a subset.)
+const TOWN = [
+  "LineageNPCs", "LineageNPCs2", "LineageNPCs3", "LineageNPCs4", "LineageNPCs5",
+  "LineageNpcsEV", "LineageNPCsEV",
+  "LineageMonsters", "LineageMonsters2", "LineageMonsters3", "LineageMonsters4",
+  "LineageMonsters5", "LineageMonsters6", "LineageMonsters7", "LineageMonsters8",
+  "LineageMonsters9", "LineageMonsters10", "LineageMonsters11", "LineageMonsters12",
+  "LineageMonsters13", "LineageMonsters14", "LineageMonsters15", "LineageMonsters16",
+];
 
 const TAG = [0xc1, 0x83, 0x2a, 0x9e];
 function decode(raw) { const hs = 28, key = raw[hs] ^ TAG[0]; const ok = [0, 1, 2, 3].every((i) => (raw[hs + i] ^ key) === TAG[i]); const b = ok ? new Uint8Array(raw.length - hs) : raw; if (ok) for (let i = 0; i < b.length; i++) b[i] = raw[hs + i] ^ key; return b; }
