@@ -46,6 +46,8 @@ export interface PlayerState {
   maxMp?: number;
   cp?: number;
   maxCp?: number;
+  /** Paperdoll item ids — populated by UserInfo (0x32) when masks decode. */
+  equip?: Partial<Record<PaperdollSlot, number>>;
 }
 
 /** A world object (NPC / monster) we render as a marker. */

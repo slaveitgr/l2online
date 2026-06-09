@@ -138,7 +138,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
           if (c.gender === "M" || c.sex === 0 || c.sex === "0") gender = "M";
         }
       } catch { /* ignore */ }
-      loadCharacterModel(race, gender, { targetHeight: 3.4 })
+      loadCharacterModel(race, gender, { targetHeight: 3.4, equip: player?.equip })
         .then((handle) => {
           if (!handle || playerModelDisposed) { handle?.dispose(); return; }
           playerModel = handle;
@@ -254,7 +254,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       if (e.isPlayer) {
         const race = RACE_BY_ORDINAL[e.race ?? 0] ?? "Human";
         const gender: "F" | "M" = e.female ? "F" : "M";
-        placeModel(e.objectId, e.x, e.y, e.z, () => loadCharacterModel(race, gender, { targetHeight: 3.4 }));
+        placeModel(e.objectId, e.x, e.y, e.z, () => loadCharacterModel(race, gender, { targetHeight: 3.4, equip: e.equip }));
         return;
       }
       ensureCapsule(e);   // always show a marker immediately
