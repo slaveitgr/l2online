@@ -448,6 +448,14 @@ export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendCh
     return off;
   }, [target?.objectId]);
 
+  // Register as the NpcHtml renderer: drains any messages that arrived while
+  // the HUD wasn't mounted yet (welcome dialog on enter-world), and shows the
+  // newest HTML for every subsequent bypass click.
+  useEffect(() => {
+    registerNpcHtmlRenderer((msg) => setHtmlWnd({ html: msg.html }));
+    return () => registerNpcHtmlRenderer(null);
+  }, []);
+
   // vitals: live protocol state wins, else the activeChar snapshot from /world
   const name = live.name ?? activeChar?.name ?? "—";
   const level = live.level ?? activeChar?.level ?? 1;
