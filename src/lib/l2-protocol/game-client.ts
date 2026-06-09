@@ -975,7 +975,16 @@ export class L2GameClient {
     r.u8(); // 0x19
     const npcObjId = r.u32();
     const html = r.str();
-    if (html) this.emit({ type: "html", npcObjId, html });
+    if (!html) return;
+    this.emit({ type: "html", npcObjId, html });
+    // Also push to the global NpcHtml queue: enter-world can arrive BEFORE the
+    // HUD mounts its listener (welcome dialog otherwise lost). The queue holds
+    // messages ~60s and flushes the moment a renderer registers.
+    try {
+      // Lazy require to avoid a circular import at module-eval time.
+      const q = require("./npc-html-queue") as typeof import("./npc-html-queue");
+      q.queueNpcHtml({ npcObjectId: npcObjId, html, receivedAt: Date.now() });
+    } catch { /* queue is optional */ }
   }
 
   // ===== target/skill/admin action senders =====
