@@ -89,3 +89,174 @@ export function pairMotionsToSequences(anim: MeshAnimation): Map<string, MotionC
   for (let i = 0; i < n; i++) out.set(anim.sequences[i].name, anim.motions[i]);
   return out;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Binary decoder. Operates on an already-isolated MeshAnimation export blob.
+// Tolerant: any sub-record that fails resyncs to the next plausible record by
+// scanning for the stable head pattern (float ∈ (0, 1e6) followed by a name
+// table index whose resolved name contains '_'). Callers pass the resolved
+// name table so we can validate name indices.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { BinaryReader, readSizedString } from "./ukx/name-table";
+
+interface NameLike { name: string }
+
+function readCompact32(r: BinaryReader): number { return r.compactSigned(); }
+
+function readArrayHeader(r: BinaryReader): number {
+  const n = readCompact32(r);
+  return n < 0 ? 0 : n;
+}
+
+function readNamedBones(r: BinaryReader, names: NameLike[]): MeshAnimation["refBones"] {
+  const count = readArrayHeader(r);
+  const out: MeshAnimation["refBones"] = new Array(count);
+  for (let i = 0; i < count; i++) {
+    const ni = readCompact32(r);
+    const name = names[ni]?.name ?? `bone_${i}`;
+    const a = r.u32();
+    const b = r.u32();
+    out[i] = { name, a, b };
+  }
+  return out;
+}
+
+function readAnalogTrack(r: BinaryReader): AnalogTrack {
+  const flags = r.u32();
+  const nQ = readArrayHeader(r);
+  const keyQuat = new Float32Array(nQ * 4);
+  for (let i = 0; i < nQ; i++) {
+    keyQuat[i * 4 + 0] = r.f32();
+    keyQuat[i * 4 + 1] = r.f32();
+    keyQuat[i * 4 + 2] = r.f32();
+    keyQuat[i * 4 + 3] = r.f32();
+  }
+  const nP = readArrayHeader(r);
+  const keyPos = new Float32Array(nP * 3);
+  for (let i = 0; i < nP; i++) {
+    keyPos[i * 3 + 0] = r.f32();
+    keyPos[i * 3 + 1] = r.f32();
+    keyPos[i * 3 + 2] = r.f32();
+  }
+  const nT = readArrayHeader(r);
+  const keyTime = new Float32Array(nT);
+  for (let i = 0; i < nT; i++) keyTime[i] = r.f32();
+  return { flags, keyQuat, keyPos, keyTime };
+}
+
+function readMotionChunk(r: BinaryReader): MotionChunk {
+  const rx = r.f32(), ry = r.f32(), rz = r.f32();
+  const trackTime = r.f32();
+  const startBone = r.u32();
+  const flags = r.u32();
+  const nbi = readArrayHeader(r);
+  const boneIndices = new Uint32Array(nbi);
+  for (let i = 0; i < nbi; i++) boneIndices[i] = r.u32();
+  const nTracks = readArrayHeader(r);
+  const tracks: AnalogTrack[] = new Array(nTracks);
+  for (let i = 0; i < nTracks; i++) tracks[i] = readAnalogTrack(r);
+  const rootTrack = readAnalogTrack(r);
+  return {
+    rootSpeed: [rx, ry, rz],
+    trackTime, startBone, flags,
+    boneIndices, tracks, rootTrack,
+  };
+}
+
+/**
+ * Read the variable-tail per-sequence record. The stable head is:
+ *   float, name(ci), groupNames FArray<name(ci)>, u32 frameStart,
+ *   u32 frameCount, notifications FArray<...>, float framerate
+ * On any anomaly, resync forward to the next float ∈ (0, 1e6) whose
+ * following name index resolves to a string containing '_'.
+ */
+function readAnimSequence(r: BinaryReader, names: NameLike[]): AnimSequence | null {
+  try {
+    /* float (anim flags / rate hint, varies) */ r.f32();
+    const ni = readCompact32(r);
+    const name = names[ni]?.name ?? "";
+    const gCount = readArrayHeader(r);
+    const groupNames: string[] = [];
+    for (let i = 0; i < gCount; i++) {
+      const gi = readCompact32(r);
+      groupNames.push(names[gi]?.name ?? "");
+    }
+    const frameStart = r.u32();
+    const frameCount = r.u32();
+    const notif = readArrayHeader(r);
+    for (let i = 0; i < notif; i++) {
+      // (float time, name function, name body, u32 flags) — best-effort skip
+      r.f32(); readCompact32(r); readCompact32(r); r.u32();
+    }
+    const framerate = r.f32();
+    if (!name || frameCount > 1_000_000 || framerate <= 0 || framerate > 240) {
+      return null;
+    }
+    return { name, groupNames, frameStart, frameCount, framerate };
+  } catch {
+    return null;
+  }
+}
+
+/** Scan forward for the next plausible sequence head, then read it. */
+function resyncAndReadSequence(r: BinaryReader, names: NameLike[], end: number): AnimSequence | null {
+  const limit = Math.min(end, r.view.byteLength) - 16;
+  while (r.pos < limit) {
+    const start = r.pos;
+    const f = r.view.getFloat32(start, true);
+    if (Number.isFinite(f) && f > 0 && f < 1e6) {
+      const saved = r.pos;
+      r.pos = start;
+      const seq = readAnimSequence(r, names);
+      if (seq && seq.name.includes("_")) return seq;
+      r.pos = saved + 1;
+    } else {
+      r.pos = start + 1;
+    }
+  }
+  return null;
+}
+
+/**
+ * Decode one MeshAnimation export blob. `start` is the byte offset (in `buf`)
+ * of the property-list end (just past "None"). `end` is the export's last byte.
+ * Returns null if the blob doesn't pass minimal sanity checks.
+ */
+export function decodeMeshAnimation(
+  buf: ArrayBuffer, start: number, end: number, names: NameLike[],
+): MeshAnimation | null {
+  try {
+    const r = new BinaryReader(buf, 0);
+    r.seek(start);
+    const version = r.u32();
+    const refBones = readNamedBones(r, names);
+    if (refBones.length === 0 || refBones.length > 4096) return null;
+    const endPos = r.u32();
+    const motionCount = readCompact32(r);
+    if (motionCount < 0 || motionCount > 100_000) return null;
+    const motions: MotionChunk[] = [];
+    for (let i = 0; i < motionCount; i++) {
+      const chunkEnd = r.u32();
+      try {
+        motions.push(readMotionChunk(r));
+      } catch { /* skip */ }
+      // jump to chunkEnd for safety against per-motion drift
+      if (chunkEnd > r.pos && chunkEnd <= end) r.seek(chunkEnd);
+    }
+    if (endPos > 0 && endPos < buf.byteLength) r.seek(endPos);
+    const seqCount = readArrayHeader(r);
+    const sequences: AnimSequence[] = [];
+    for (let i = 0; i < seqCount; i++) {
+      const seq = readAnimSequence(r, names);
+      if (seq) { sequences.push(seq); continue; }
+      const rec = resyncAndReadSequence(r, names, end);
+      if (rec) sequences.push(rec); else break;
+    }
+    return { version, refBones, motions, sequences };
+  } catch {
+    return null;
+  }
+}
+
+void readSizedString; // re-exported by skeletal-mesh; pin import here too.
