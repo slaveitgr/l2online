@@ -830,7 +830,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       selectRing.geometry.dispose(); (selectRing.material as THREE.Material).dispose();
       entityMeshes.forEach((m) => scene.remove(m));
       entityMeshes.clear();
-      entityModels.forEach((em) => { if (em.handle) { scene.remove(em.handle.group); em.handle.dispose(); } });
+      entityModels.forEach((em) => { em.anim?.dispose(); if (em.handle) { scene.remove(em.handle.group); em.handle.dispose(); } });
       entityModels.clear();
       playerModelDisposed = true;
       if (playerModel) { scene.remove(playerModel.group); playerModel.dispose(); }
