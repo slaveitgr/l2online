@@ -45,6 +45,19 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     meshes: number;
   } | null>(null);
   const [mapInfo, setMapInfo] = useState<{ path: string; actors: number; spawns: number } | null>(null);
+  // Dev overlays (FPS / Asset Loader / controls hint) sit behind the HUD on a
+  // separate low-z layer, are toggled with `~`, and are hidden in production.
+  const [showDebug, setShowDebug] = useState<boolean>(() => import.meta.env.DEV);
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el?.matches?.("input,textarea")) return;
+      if (e.key === "`" || e.key === "~") { e.preventDefault(); setShowDebug((v) => !v); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     const mount = mountRef.current;
