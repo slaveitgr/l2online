@@ -223,8 +223,8 @@ export function applyQuatTreatment(
   if (mode === "raw") return sk;
   const bones = (sk.bones as RefBone[]).map((b, i) => {
     if (mode === "conj-children" && i === 0) return b;
-    const q = (b.rotation ?? [0, 0, 0, 1]) as Quat;
-    return { ...b, rotation: qConj(q) };
+    const q = (b.quat ?? [0, 0, 0, 1]) as Quat;
+    return { ...b, quat: qConj(q) };
   });
   return { ...sk, bones };
 }
