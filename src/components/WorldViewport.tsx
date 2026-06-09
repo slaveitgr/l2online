@@ -254,7 +254,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       if (e.isPlayer) {
         const race = RACE_BY_ORDINAL[e.race ?? 0] ?? "Human";
         const gender: "F" | "M" = e.female ? "F" : "M";
-        placeModel(e.objectId, e.x, e.y, e.z, () => loadCharacterModel(race, gender, { targetHeight: 3.4 }));
+        placeModel(e.objectId, e.x, e.y, e.z, () => loadCharacterModel(race, gender, { targetHeight: 3.4, equip: e.equip }));
         return;
       }
       ensureCapsule(e);   // always show a marker immediately
