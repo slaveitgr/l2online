@@ -87,7 +87,9 @@ export async function loadNpcMesh(meshFullName: string, opts: { targetHeight?: n
   const group = new THREE.Group();
   group.name = `Npc:${meshFullName}`;
   const disposables: Array<THREE.BufferGeometry | THREE.Material | THREE.Texture> = [];
-  const mat = new THREE.MeshStandardMaterial({ color: 0xb8ad97, roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide });
+  // Neutral gray fallback when no texture loads — guarantees we never render
+  // pure white meshes (which made unmappable NPCs look like ghosts).
+  const mat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide });
   disposables.push(mat);
 
   if (opts.texName) {
