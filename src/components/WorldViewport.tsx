@@ -140,6 +140,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
 
     // Swap the cone for the player's real character model.
     let playerModel: CharacterModelHandle | null = null;
+    let playerAnim: LocomotionAnimator | null = null;
     let playerModelDisposed = false;
     (() => {
       let race = "Human";
