@@ -45,6 +45,19 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     meshes: number;
   } | null>(null);
   const [mapInfo, setMapInfo] = useState<{ path: string; actors: number; spawns: number } | null>(null);
+  // Dev overlays (FPS / Asset Loader / controls hint) sit behind the HUD on a
+  // separate low-z layer, are toggled with `~`, and are hidden in production.
+  const [showDebug, setShowDebug] = useState<boolean>(() => import.meta.env.DEV);
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el?.matches?.("input,textarea")) return;
+      if (e.key === "`" || e.key === "~") { e.preventDefault(); setShowDebug((v) => !v); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -809,59 +822,56 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     <div className="relative w-full h-full">
       <div ref={mountRef} className="absolute inset-0" />
 
-      {/* Top-left HUD */}
-      <div className="absolute top-4 left-4 panel rounded px-4 py-3 font-mono text-xs space-y-1 pointer-events-none">
-        <div className="flex gap-4">
-          <span className="text-gold">FPS</span>
-          <span className="text-foreground tabular-nums">{fps}</span>
-        </div>
-        <div className="flex gap-4">
-          <span className="text-gold">POS</span>
-          <span className="text-foreground tabular-nums">
-            {worldPos ? `${worldPos.x} ${worldPos.y} ${worldPos.z}` : "—"}
-          </span>
-        </div>
-        <div className="flex gap-4">
-          <span className="text-gold">NPCS</span>
-          <span className="text-foreground tabular-nums">{entityCount}</span>
-        </div>
-      </div>
-
-      {/* Bottom-left asset status */}
-      <div className="absolute bottom-4 left-4 panel rounded px-4 py-3 font-mono text-xs max-w-md pointer-events-none">
-        <div className="text-gold tracking-widest mb-1 uppercase">Asset Loader</div>
-        <div className="text-muted-foreground">{loadStatus}</div>
-        {assetSummary && (
-          <div className="mt-2 pt-2 border-t border-border/40 text-foreground/80 grid grid-cols-3 gap-x-3">
-            <div>
-              <span className="text-gold-muted">maps</span> {assetSummary.maps.length}
+      {/* Dev overlays: hidden in production, toggled with ` / ~ in dev.
+          z-0 keeps them BEHIND the game HUD (which renders on top). */}
+      {showDebug && (
+        <div className="absolute inset-0 pointer-events-none z-0">
+          {/* Top-left HUD */}
+          <div className="absolute top-4 left-4 panel rounded px-4 py-3 font-mono text-xs space-y-1">
+            <div className="flex gap-4">
+              <span className="text-gold">FPS</span>
+              <span className="text-foreground tabular-nums">{fps}</span>
             </div>
-            <div>
-              <span className="text-gold-muted">tex</span> {assetSummary.textures}
+            <div className="flex gap-4">
+              <span className="text-gold">POS</span>
+              <span className="text-foreground tabular-nums">
+                {worldPos ? `${worldPos.x} ${worldPos.y} ${worldPos.z}` : "—"}
+              </span>
             </div>
-            <div>
-              <span className="text-gold-muted">mesh</span> {assetSummary.meshes}
+            <div className="flex gap-4">
+              <span className="text-gold">NPCS</span>
+              <span className="text-foreground tabular-nums">{entityCount}</span>
             </div>
           </div>
-        )}
-        {mapInfo && (
-          <div className="mt-2 pt-2 border-t border-border/40 text-foreground/80">
-            <span className="text-gold-muted">map</span> {mapInfo.path} ·{" "}
-            <span className="text-gold-muted">actors</span> {mapInfo.actors} ·{" "}
-            <span className="text-gold-muted">spawns</span> {mapInfo.spawns}
-          </div>
-        )}
-      </div>
 
-      {/* Bottom-right controls hint */}
-      <div className="absolute bottom-4 right-4 panel rounded px-4 py-3 font-mono text-[10px] text-muted-foreground pointer-events-none">
-        <div>
-          <span className="text-gold-muted">DRAG</span> orbit
+          {/* Bottom-left asset status */}
+          <div className="absolute bottom-4 left-4 panel rounded px-4 py-3 font-mono text-xs max-w-md">
+            <div className="text-gold tracking-widest mb-1 uppercase">Asset Loader</div>
+            <div className="text-muted-foreground">{loadStatus}</div>
+            {assetSummary && (
+              <div className="mt-2 pt-2 border-t border-border/40 text-foreground/80 grid grid-cols-3 gap-x-3">
+                <div><span className="text-gold-muted">maps</span> {assetSummary.maps.length}</div>
+                <div><span className="text-gold-muted">tex</span> {assetSummary.textures}</div>
+                <div><span className="text-gold-muted">mesh</span> {assetSummary.meshes}</div>
+              </div>
+            )}
+            {mapInfo && (
+              <div className="mt-2 pt-2 border-t border-border/40 text-foreground/80">
+                <span className="text-gold-muted">map</span> {mapInfo.path} ·{" "}
+                <span className="text-gold-muted">actors</span> {mapInfo.actors} ·{" "}
+                <span className="text-gold-muted">spawns</span> {mapInfo.spawns}
+              </div>
+            )}
+          </div>
+
+          {/* Bottom-right controls hint */}
+          <div className="absolute bottom-4 right-4 panel rounded px-4 py-3 font-mono text-[10px] text-muted-foreground">
+            <div><span className="text-gold-muted">DRAG</span> orbit</div>
+            <div><span className="text-gold-muted">WHEEL</span> zoom</div>
+            <div className="mt-1 opacity-60">~ toggle debug</div>
+          </div>
         </div>
-        <div>
-          <span className="text-gold-muted">WHEEL</span> zoom
-        </div>
-      </div>
+      )}
     </div>
   );
 }
