@@ -99,21 +99,97 @@ async function main() {
   const loadUtx = (pk) => { const k = pk.toLowerCase(); if (cache.has(k)) return cache.get(k); const f = sysFiles.find((x) => x.toLowerCase() === `${k}.utx`); let pkg = null; if (f) { try { pkg = parsePkg(decode(new Uint8Array(readFileSync(join(SYSTEX, f)).buffer))); } catch { pkg = null; } } cache.set(k, pkg); return pkg; };
   let ok = 0, miss = 0, skip = 0;
   const { existsSync } = await import("node:fs");
+
+  // Levenshtein for nearest-name diagnostics (small, inline).
+  const lev = (a, b) => { const m = a.length, n = b.length; if (!m) return n; if (!n) return m; const dp = new Array(n + 1); for (let j = 0; j <= n; j++) dp[j] = j; for (let i = 1; i <= m; i++) { let prev = dp[0]; dp[0] = i; for (let j = 1; j <= n; j++) { const tmp = dp[j]; dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]); prev = tmp; } } return dp[n]; };
+  const isTex = (x) => /texture/i.test(x.className);
+  const isShader = (x) => /shader|finalblend|modifier|texenvmap|texpanner|texoscillator|texrotator|texscaler|combiner/i.test(x.className);
+  const notMap = (n) => !/_sp\d?$|_sh$|_n$|_normal$/i.test(n);
+
+  // Walk an export's properties and collect Diffuse / Material / Texture refs.
+  function readShaderRefs(pkg, e) {
+    const { b, dv, c32 } = pkg; let o = e.offset; const ci = () => { const [v, s] = c32(o); o += s; return v; };
+    if (e.flags & RF_HAS_STACK) { const n = ci(); ci(); o += 12; if (n !== 0) ci(); }
+    const refs = []; let g = 0;
+    for (;;) {
+      if (g++ > 400) break;
+      const nm = pkg.names[ci()]; if (nm === "None") break;
+      const info = b[o++]; const pt = info & 0x0f, szc = info & 0x70, arr = info & 0x80;
+      if (pt === 0x0a) ci();
+      let d; if (szc in SS) d = SS[szc]; else if (szc === 0x50) d = b[o++]; else if (szc === 0x60) { d = dv.getUint16(o, true); o += 2; } else if (szc === 0x70) { d = dv.getUint32(o, true); o += 4; } else d = 0;
+      if (arr && pt !== 0x03) o++;
+      if (pt === 0x03) continue;
+      // pt === 0x05 → ObjectProperty (compact int signed: >0 export, <0 import).
+      if (pt === 0x05 && /^(Diffuse|Material|Texture|FallbackMaterial|DiffuseTexture)$/i.test(nm)) {
+        const ref = c32(o)[0];
+        refs.push({ propName: nm, ref });
+      }
+      o += d;
+    }
+    return refs;
+  }
+
+  // Resolve an export to a Texture export, following Shader/FinalBlend chains
+  // across packages. Returns { pkg, exp } or null. depth-limited to 3.
+  function resolveTexture(pkg, e, depth, seen) {
+    if (depth > 3 || !e) return null;
+    const key = `${pkg.__name || ""}#${e.offset}`;
+    if (seen.has(key)) return null;
+    seen.add(key);
+    if (isTex(e)) return { pkg, exp: e };
+    if (!isShader(e)) return null;
+    const refs = readShaderRefs(pkg, e);
+    for (const { ref } of refs) {
+      if (ref > 0) {
+        const next = pkg.exps[ref - 1];
+        const hit = resolveTexture(pkg, next, depth + 1, seen);
+        if (hit) return hit;
+      } else if (ref < 0) {
+        const imp = pkg.imps[-ref - 1]; if (!imp) continue;
+        const otherPkg = imp.packageName && loadUtx(imp.packageName);
+        if (!otherPkg) continue;
+        const nextExp = otherPkg.exps.find((x) => x.objectName === imp.objectName);
+        if (!nextExp) continue;
+        const hit = resolveTexture(otherPkg, nextExp, depth + 1, seen);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  }
+
   for (const full of tex) {
     if (existsSync(join(OUTDIR, texFileName(full)))) { skip++; ok++; continue; }
     const parts = full.split("."); const pk = parts[0]; const exportName = parts[parts.length - 1];
-    const pkg = loadUtx(pk); if (!pkg) { miss++; continue; }
-    // npcgrp gives the BASE name; the diffuse export is usually "<name>_ori"
-    // (siblings "_sp"=specular, "_n"=normal, "_sh"=shadow — skip those).
-    const isTex = (x) => /texture/i.test(x.className);
-    const notMap = (n) => !/_sp\d?$|_sh$|_n$|_normal$/i.test(n);
-    const want = [exportName + "_ori", exportName];
-    let e = null;
-    for (const w of want) { e = pkg.exps.find((x) => x.objectName === w && isTex(x) && notMap(x.objectName)); if (e) break; }
-    if (!e) e = pkg.exps.find((x) => x.objectName.startsWith(exportName) && isTex(x) && notMap(x.objectName));
-    if (!e) { miss++; continue; }
-    let dec; try { dec = readTexture(pkg, e); } catch { dec = null; }
-    if (!dec) { miss++; continue; }
+    const pkg = loadUtx(pk); if (!pkg) { miss++; console.warn(`[tex-miss] ${full} — package not found`); continue; }
+    pkg.__name = pk;
+
+    // Search order: (1) exact Texture, (2) <name>_ori, (3) prefix Texture, (4) Shader-chain follow.
+    let candidate = null;
+    candidate = pkg.exps.find((x) => x.objectName === exportName && isTex(x) && notMap(x.objectName));
+    if (!candidate) candidate = pkg.exps.find((x) => x.objectName === exportName + "_ori" && isTex(x) && notMap(x.objectName));
+    if (!candidate) candidate = pkg.exps.find((x) => x.objectName.startsWith(exportName) && isTex(x) && notMap(x.objectName));
+
+    // If still no Texture, look for a Shader/FinalBlend with that name and follow its refs.
+    let resolved = candidate ? { pkg, exp: candidate } : null;
+    if (!resolved) {
+      const shader = pkg.exps.find((x) => (x.objectName === exportName || x.objectName === exportName + "_ori" || x.objectName.startsWith(exportName)) && isShader(x));
+      if (shader) resolved = resolveTexture(pkg, shader, 0, new Set());
+    }
+
+    if (!resolved) {
+      const nearest = pkg.exps
+        .filter((x) => isTex(x) || isShader(x))
+        .map((x) => ({ name: x.objectName, cls: x.className, d: lev(x.objectName.toLowerCase(), exportName.toLowerCase()) }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 5)
+        .map((x) => `${x.name}(${x.cls})`);
+      console.warn(`[tex-miss] ${full} — nearest: ${nearest.join(", ") || "<none>"}`);
+      miss++;
+      continue;
+    }
+
+    let dec; try { dec = readTexture(resolved.pkg, resolved.exp); } catch { dec = null; }
+    if (!dec) { console.warn(`[tex-miss] ${full} — decode failed for ${resolved.exp.objectName}`); miss++; continue; }
     await writeFile(join(OUTDIR, texFileName(full)), png(dec.rgba, dec.width, dec.height));
     ok++;
   }
