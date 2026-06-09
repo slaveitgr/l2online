@@ -124,6 +124,11 @@ export interface IndexedTerrainInfo {
   layerCount: number;
   terrainLayers: TerrainLayerRef[];
   rawProperties: UnrealProperty[];
+  /** FCoords from the binary tail: [origin(3), X(3), Y(3), Z(3)]. */
+  toWorld: number[] | null;
+  /** Heightmap grid dimensions from binary tail (may differ from texture w/h). */
+  heightmapTailX: number | null;
+  heightmapTailY: number | null;
 }
 
 interface Cursor {
