@@ -252,6 +252,8 @@ export async function loadCharacterModel(
 
   return {
     group,
+    inner,
+    bodyParts: bodyPartMeshes,
     dispose: () => disposables.forEach((d) => d.dispose()),
   };
 }
