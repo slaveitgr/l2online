@@ -299,6 +299,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       if (m) { scene.remove(m); entityMeshes.delete(objectId); }
       const em = entityModels.get(objectId);
       if (em) {
+        em.anim?.dispose();
         if (em.handle) { scene.remove(em.handle.group); em.handle.dispose(); }
         entityModels.delete(objectId);
       }
