@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
 import { useSprites } from "@/components/hud/L2Sprite";
 import { getGameConnection, type GameEvent, type PlayerState, type SkillEntry } from "@/lib/l2-protocol/game-client";
+import { registerNpcHtmlRenderer } from "@/lib/l2-protocol/npc-html-queue";
 import { L2XdatWindow, type XdatWindowKey } from "@/components/hud/L2XdatWindow";
 import { L2ExitDialog } from "@/components/hud/L2GameWindows";
 
