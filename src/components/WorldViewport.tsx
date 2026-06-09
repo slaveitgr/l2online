@@ -232,8 +232,28 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       try {
         const info = await npcMeshInfo(e.displayId);
         if (info?.m) {
-          placeModel(e.objectId, e.x, e.y, e.z, () => loadNpcMesh(info.m, { targetHeight: 3.4, texName: info.t?.[0] }), () => dropCapsule(e.objectId));
-          upgradedOrSkipped.add(e.objectId);
+          // If the package bundle is known-missing on the server, DON'T permanently
+          // mark this NPC as skipped — let the pump retry on the next tick in case
+          // a new bundle ships. The lookup itself is cheap (in-memory set).
+          if (isNpcPkgKnownMissing(info.m)) return;
+
+          let placed = false;
+          await new Promise<void>((resolve) => {
+            placeModel(
+              e.objectId, e.x, e.y, e.z,
+              async () => {
+                const h = await loadNpcMesh(info.m, { targetHeight: 3.4, texName: info.t?.[0] });
+                placed = !!h;
+                resolve();
+                return h;
+              },
+              () => dropCapsule(e.objectId),
+            );
+            // If placeModel already had the entity (entityModels.has), it returns
+            // synchronously without calling our loader — resolve immediately.
+            if (entityModels.get(e.objectId)?.handle) { placed = true; resolve(); }
+          });
+          if (placed) upgradedOrSkipped.add(e.objectId);
           return;
         }
         const a = npcAppearance[String(e.displayId)];
