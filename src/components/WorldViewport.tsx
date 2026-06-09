@@ -202,13 +202,17 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       const p = toScene(x, y, z); // feet at ground (models seat feet at y=0)
       let em = entityModels.get(objectId);
       if (!em) {
-        em = { handle: null, scenePos: p.clone(), target: p.clone(), yaw: 0, yawTarget: 0 };
+        em = { handle: null, anim: null, scenePos: p.clone(), target: p.clone(), yaw: 0, yawTarget: 0 };
         entityModels.set(objectId, em);
         loader()
           .then((handle) => {
             const still = entityModels.get(objectId);
             if (!handle || !still) { handle?.dispose(); return; }
             still.handle = handle;
+            // Attach a locomotion animator if the handle exposes body parts.
+            if (handle.bodyParts && handle.bodyParts.length) {
+              still.anim = attachLocomotionAnimator(handle as CharacterModelHandle);
+            }
             handle.group.position.copy(still.scenePos);
             handle.group.userData.objectId = objectId; // selectable
             scene.add(handle.group);
