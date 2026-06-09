@@ -182,9 +182,10 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     const npcMat = new THREE.MeshStandardMaterial({ color: 0xb5483a, roughness: 0.7 });
     const entityMeshes = new Map<number, THREE.Mesh>(); // capsules (NPCs)
 
-    interface ModelHandle { group: THREE.Object3D; dispose: () => void; }
+    interface ModelHandle { group: THREE.Object3D; inner?: THREE.Group; bodyParts?: Array<{ name: string; mesh: THREE.Mesh }>; dispose: () => void; }
     interface EntityModel {
       handle: ModelHandle | null;
+      anim: LocomotionAnimator | null;
       scenePos: THREE.Vector3;
       target: THREE.Vector3;
       yaw: number;
