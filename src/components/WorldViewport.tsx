@@ -157,6 +157,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         .then((handle) => {
           if (!handle || playerModelDisposed) { handle?.dispose(); return; }
           playerModel = handle;
+          playerAnim = attachLocomotionAnimator(handle);
           handle.group.position.set(0, 0, 0);
           scene.add(handle.group);
           scene.remove(playerMesh); // hide the placeholder cone
