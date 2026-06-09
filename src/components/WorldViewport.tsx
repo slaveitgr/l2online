@@ -138,7 +138,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
           if (c.gender === "M" || c.sex === 0 || c.sex === "0") gender = "M";
         }
       } catch { /* ignore */ }
-      loadCharacterModel(race, gender, { targetHeight: 3.4 })
+      loadCharacterModel(race, gender, { targetHeight: 3.4, equip: client?.player?.equip })
         .then((handle) => {
           if (!handle || playerModelDisposed) { handle?.dispose(); return; }
           playerModel = handle;
