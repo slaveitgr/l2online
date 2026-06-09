@@ -542,10 +542,18 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     let frameCount = 0;
     let lastFpsTime = performance.now();
     let raf = 0;
+    let lastTickMs = performance.now();
+    // Last positions used to derive scene-unit/sec speed for the locomotion
+    // animators (kills the slide: limbs swing in time with actual motion).
+    const playerLastPos = new THREE.Vector3();
     const tick = () => {
       const t = performance.now() * 0.001;
+      const nowMs = performance.now();
+      const dtSec = Math.min(0.1, Math.max(0.001, (nowMs - lastTickMs) / 1000));
+      lastTickMs = nowMs;
 
       // chase the player toward the server/click target + face travel direction
+      playerLastPos.copy(playerScenePos);
       playerScenePos.lerp(playerTargetPos, 0.12);
       let dy = playerYawTarget - playerYaw;
       while (dy > Math.PI) dy -= Math.PI * 2;
@@ -558,9 +566,15 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         playerModel.group.position.copy(playerScenePos);
         playerModel.group.rotation.y = playerYaw;
       }
+      if (playerAnim) {
+        const dx = playerScenePos.x - playerLastPos.x, dz = playerScenePos.z - playerLastPos.z;
+        const speed = Math.hypot(dx, dz) / dtSec;
+        playerAnim.update(dtSec, speed);
+      }
 
       // chase every other-player model toward its server target + face travel
       for (const em of entityModels.values()) {
+        const prevX = em.scenePos.x, prevZ = em.scenePos.z;
         em.scenePos.lerp(em.target, 0.12);
         let edy = em.yawTarget - em.yaw;
         while (edy > Math.PI) edy -= Math.PI * 2;
@@ -569,6 +583,10 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         if (em.handle) {
           em.handle.group.position.copy(em.scenePos);
           em.handle.group.rotation.y = em.yaw;
+        }
+        if (em.anim) {
+          const dx = em.scenePos.x - prevX, dz = em.scenePos.z - prevZ;
+          em.anim.update(dtSec, Math.hypot(dx, dz) / dtSec);
         }
       }
       updateCamera();
