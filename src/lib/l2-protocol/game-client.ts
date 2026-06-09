@@ -691,8 +691,42 @@ export class L2GameClient {
     const name = r.str();
     const race = r.u16();
     const female = r.u8() !== 0;
-    // (classId + paperdoll follow — not needed for placement)
-    const entity: WorldEntity = { objectId, displayId: -1, x, y, z, heading: 0, isPlayer: true, name, race, female };
+
+    // classId + paperdoll (best-effort; trailing aug/enchant arrays vary by build).
+    let classId: number | undefined;
+    let equip: WorldEntity["equip"];
+    try {
+      classId = r.u32();
+      r.u32(); // class-id-2 / pad (Grand Crusade reveal)
+      // Paperdoll slot ids (u32 each), full L2 order. We only keep the
+      // slots that drive rendering today; rest are read to keep alignment.
+      const slotOrder = [
+        "_under", "_rear", "_lear", "_neck",
+        "_rfinger", "_lfinger",
+        "head", "rhand", "lhand", "gloves", "chest", "legs", "feet", "cloak",
+        "_lrhand", "_hair", "_hair2",
+        "_rbracelet", "_lbracelet",
+        "_t1", "_t2", "_t3", "_t4", "_t5", "_t6",
+        "_belt",
+      ] as const;
+      const out: NonNullable<WorldEntity["equip"]> = {};
+      for (const slot of slotOrder) {
+        const id = r.u32();
+        if (id && !slot.startsWith("_")) {
+          (out as Record<string, number>)[slot] = id;
+        }
+      }
+      if (Object.keys(out).length) equip = out;
+    } catch {
+      // Body shorter than expected — keep whatever we got so far.
+    }
+
+    const entity: WorldEntity = {
+      objectId, displayId: -1, x, y, z, heading: 0,
+      isPlayer: true, name, race, female,
+      ...(classId !== undefined ? { classId } : {}),
+      ...(equip ? { equip } : {}),
+    };
     this._entities.set(objectId, entity);
     this.emit({ type: "npc-spawn", entity });
   }
