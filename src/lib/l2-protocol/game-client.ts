@@ -16,6 +16,7 @@ import { GameCrypt } from "./game-crypt";
 import { classNameOf, raceNameOf } from "./classes";
 import { PacketReader, PacketWriter } from "./packets";
 import { logUnknownOpcode } from "./unknown-opcode-log";
+import { queueNpcHtml } from "./npc-html-queue";
 
 export interface GameCharacter {
   id: string; // objectId as hex
