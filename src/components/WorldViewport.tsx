@@ -12,6 +12,7 @@ import {
   getDialogTarget,
 } from "@/lib/game-state";
 import { loadCharacterModel, type CharacterModelHandle } from "@/lib/character-mesh";
+import { attachLocomotionAnimator, type LocomotionAnimator } from "@/lib/character-anim";
 import { loadNpcMesh, npcMeshInfo, npcMeshInfoSync, isNpcPkgLoaded, isNpcPkgKnownMissing } from "@/lib/npc-mesh";
 
 /**
