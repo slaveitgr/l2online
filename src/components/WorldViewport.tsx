@@ -12,6 +12,7 @@ import {
   getDialogTarget,
 } from "@/lib/game-state";
 import { loadCharacterModel, type CharacterModelHandle } from "@/lib/character-mesh";
+import { attachLocomotionAnimator, type LocomotionAnimator } from "@/lib/character-anim";
 import { loadNpcMesh, npcMeshInfo, npcMeshInfoSync, isNpcPkgLoaded, isNpcPkgKnownMissing } from "@/lib/npc-mesh";
 
 /**
@@ -139,6 +140,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
 
     // Swap the cone for the player's real character model.
     let playerModel: CharacterModelHandle | null = null;
+    let playerAnim: LocomotionAnimator | null = null;
     let playerModelDisposed = false;
     (() => {
       let race = "Human";
@@ -155,6 +157,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         .then((handle) => {
           if (!handle || playerModelDisposed) { handle?.dispose(); return; }
           playerModel = handle;
+          playerAnim = attachLocomotionAnimator(handle);
           handle.group.position.set(0, 0, 0);
           scene.add(handle.group);
           scene.remove(playerMesh); // hide the placeholder cone
@@ -179,9 +182,10 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     const npcMat = new THREE.MeshStandardMaterial({ color: 0xb5483a, roughness: 0.7 });
     const entityMeshes = new Map<number, THREE.Mesh>(); // capsules (NPCs)
 
-    interface ModelHandle { group: THREE.Object3D; dispose: () => void; }
+    interface ModelHandle { group: THREE.Object3D; inner?: THREE.Group; bodyParts?: Array<{ name: string; mesh: THREE.Mesh }>; dispose: () => void; }
     interface EntityModel {
       handle: ModelHandle | null;
+      anim: LocomotionAnimator | null;
       scenePos: THREE.Vector3;
       target: THREE.Vector3;
       yaw: number;
@@ -198,13 +202,17 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       const p = toScene(x, y, z); // feet at ground (models seat feet at y=0)
       let em = entityModels.get(objectId);
       if (!em) {
-        em = { handle: null, scenePos: p.clone(), target: p.clone(), yaw: 0, yawTarget: 0 };
+        em = { handle: null, anim: null, scenePos: p.clone(), target: p.clone(), yaw: 0, yawTarget: 0 };
         entityModels.set(objectId, em);
         loader()
           .then((handle) => {
             const still = entityModels.get(objectId);
             if (!handle || !still) { handle?.dispose(); return; }
             still.handle = handle;
+            // Attach a locomotion animator if the handle exposes body parts.
+            if (handle.bodyParts && handle.bodyParts.length) {
+              still.anim = attachLocomotionAnimator(handle as CharacterModelHandle);
+            }
             handle.group.position.copy(still.scenePos);
             handle.group.userData.objectId = objectId; // selectable
             scene.add(handle.group);
@@ -291,6 +299,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       if (m) { scene.remove(m); entityMeshes.delete(objectId); }
       const em = entityModels.get(objectId);
       if (em) {
+        em.anim?.dispose();
         if (em.handle) { scene.remove(em.handle.group); em.handle.dispose(); }
         entityModels.delete(objectId);
       }
@@ -533,10 +542,18 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
     let frameCount = 0;
     let lastFpsTime = performance.now();
     let raf = 0;
+    let lastTickMs = performance.now();
+    // Last positions used to derive scene-unit/sec speed for the locomotion
+    // animators (kills the slide: limbs swing in time with actual motion).
+    const playerLastPos = new THREE.Vector3();
     const tick = () => {
       const t = performance.now() * 0.001;
+      const nowMs = performance.now();
+      const dtSec = Math.min(0.1, Math.max(0.001, (nowMs - lastTickMs) / 1000));
+      lastTickMs = nowMs;
 
       // chase the player toward the server/click target + face travel direction
+      playerLastPos.copy(playerScenePos);
       playerScenePos.lerp(playerTargetPos, 0.12);
       let dy = playerYawTarget - playerYaw;
       while (dy > Math.PI) dy -= Math.PI * 2;
@@ -549,9 +566,15 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         playerModel.group.position.copy(playerScenePos);
         playerModel.group.rotation.y = playerYaw;
       }
+      if (playerAnim) {
+        const dx = playerScenePos.x - playerLastPos.x, dz = playerScenePos.z - playerLastPos.z;
+        const speed = Math.hypot(dx, dz) / dtSec;
+        playerAnim.update(dtSec, speed);
+      }
 
       // chase every other-player model toward its server target + face travel
       for (const em of entityModels.values()) {
+        const prevX = em.scenePos.x, prevZ = em.scenePos.z;
         em.scenePos.lerp(em.target, 0.12);
         let edy = em.yawTarget - em.yaw;
         while (edy > Math.PI) edy -= Math.PI * 2;
@@ -560,6 +583,10 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
         if (em.handle) {
           em.handle.group.position.copy(em.scenePos);
           em.handle.group.rotation.y = em.yaw;
+        }
+        if (em.anim) {
+          const dx = em.scenePos.x - prevX, dz = em.scenePos.z - prevZ;
+          em.anim.update(dtSec, Math.hypot(dx, dz) / dtSec);
         }
       }
       updateCamera();
@@ -803,9 +830,10 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       selectRing.geometry.dispose(); (selectRing.material as THREE.Material).dispose();
       entityMeshes.forEach((m) => scene.remove(m));
       entityMeshes.clear();
-      entityModels.forEach((em) => { if (em.handle) { scene.remove(em.handle.group); em.handle.dispose(); } });
+      entityModels.forEach((em) => { em.anim?.dispose(); if (em.handle) { scene.remove(em.handle.group); em.handle.dispose(); } });
       entityModels.clear();
       playerModelDisposed = true;
+      playerAnim?.dispose();
       if (playerModel) { scene.remove(playerModel.group); playerModel.dispose(); }
       if (mapGroup) scene.remove(mapGroup);
       mapDisposables.forEach((d) => d.dispose());
