@@ -34,21 +34,59 @@ function release() {
   if (next) next();
 }
 
+/**
+ * Package name aliases. Npcgrp.dat refers to mesh classes in singular form
+ * (LineageMonster, LineageNpc) but the actual .ukx/.json bundle is plural
+ * (LineageMonsters, LineageNPCs). Also normalises casing variants we see
+ * in the wild (LineageNPCsEV vs LineageNpcsEV, LineageNPC vs LineageNpc).
+ */
+function aliasPkg(pkg: string): string {
+  let m = /^LineageMonster(\d*)$/i.exec(pkg); if (m) return `LineageMonsters${m[1]}`;
+  m = /^LineageNpc(\d*)$/i.exec(pkg);         if (m) return `LineageNPCs${m[1]}`;
+  m = /^LineageNPC(\d*)$/i.exec(pkg);         if (m) return `LineageNPCs${m[1]}`;
+  return pkg;
+}
+
+/** Known extracted packages — kept here so we can do case-insensitive lookup
+ *  without a directory listing API. Append as new packages get extracted. */
+const KNOWN_PKGS = [
+  "LineageNPCs", "LineageNPCs2", "LineageNPCs3", "LineageNPCs4", "LineageNPCs5",
+  "LineageNpcsEV", "LineageNPCsEV",
+  "LineageMonsters", "LineageMonsters2", "LineageMonsters3", "LineageMonsters4",
+  "LineageMonsters5", "LineageMonsters6", "LineageMonsters7", "LineageMonsters8",
+  "LineageMonsters9", "LineageMonsters10", "LineageMonsters11", "LineageMonsters12",
+  "LineageMonsters13", "LineageMonsters14", "LineageMonsters15", "LineageMonsters16",
+  "Branch", "Branch2", "dropitems",
+];
+const _knownByLower = new Map(KNOWN_PKGS.map((n) => [n.toLowerCase(), n]));
+function resolveActualName(pkg: string): string {
+  return _knownByLower.get(pkg.toLowerCase()) ?? _knownByLower.get(aliasPkg(pkg).toLowerCase()) ?? pkg;
+}
+
 const _pkgCache = new Map<string, Promise<Pkg | null>>();
+const _missingPkgs = new Set<string>(); // log each missing pkg once
 function loadPkg(pkg: string): Promise<Pkg | null> {
-  let p = _pkgCache.get(pkg);
+  const actual = resolveActualName(pkg);
+  let p = _pkgCache.get(actual);
   if (!p) {
     p = (async () => {
       await acquire();
       try {
         // `priority: 'low'` keeps tiles/avatar fetches ahead of these multi-MB bundles.
         const init = { priority: "low" } as RequestInit;
-        const r = await fetch(`/models/npc/pkg/${pkg}.json`, init);
-        if (!r.ok) return null;
+        const r = await fetch(`/models/npc/pkg/${actual}.json`, init);
+        if (!r.ok) {
+          if (!_missingPkgs.has(actual)) {
+            _missingPkgs.add(actual);
+            // eslint-disable-next-line no-console
+            console.warn(`[npc] package bundle missing: ${actual}.json — extract with: node tools/l2-extract-npc-meshes.mjs ${actual}`);
+          }
+          return null;
+        }
         return (await r.json()) as Pkg;
       } catch { return null; } finally { release(); }
     })();
-    _pkgCache.set(pkg, p);
+    _pkgCache.set(actual, p);
   }
   return p;
 }
@@ -57,7 +95,7 @@ function loadPkg(pkg: string): Promise<Pkg | null> {
 export function isNpcPkgLoaded(meshFullName: string): boolean {
   const dot = meshFullName.indexOf(".");
   if (dot < 0) return false;
-  return _pkgCache.has(meshFullName.slice(0, dot));
+  return _pkgCache.has(resolveActualName(meshFullName.slice(0, dot)));
 }
 
 /** Returns { m, t } for an npc display id, or null if it isn't in the map. */
@@ -74,6 +112,22 @@ export function npcMeshInfoSync(displayId: number): { m: string; t?: string[] } 
 /** PNG filename for a texture full-name (must match l2-extract-npc-textures.mjs). */
 function texFile(full: string): string { return full.replace(/[^A-Za-z0-9]+/g, "_") + ".png"; }
 
+/** Find the best matching mesh entry inside an extracted package bundle.
+ *  Priority: exact → "<obj>_m00" → largest export that startsWith(<obj>). */
+function pickEntry(pkg: Pkg, exportName: string): { name: string; entry: MeshEntry } | null {
+  if (pkg[exportName]) return { name: exportName, entry: pkg[exportName] };
+  const m00 = `${exportName}_m00`;
+  if (pkg[m00]) return { name: m00, entry: pkg[m00] };
+  const lc = exportName.toLowerCase();
+  let best: { name: string; entry: MeshEntry; verts: number } | null = null;
+  for (const [name, entry] of Object.entries(pkg)) {
+    if (!name.toLowerCase().startsWith(lc)) continue;
+    const verts = entry.parts?.reduce((s, p) => s + (p.positions?.length ?? 0), 0) ?? 0;
+    if (!best || verts > best.verts) best = { name, entry, verts };
+  }
+  return best ? { name: best.name, entry: best.entry } : null;
+}
+
 /** Build a renderable group for a "Pkg.export" mesh name, or null if unavailable. */
 export async function loadNpcMesh(meshFullName: string, opts: { targetHeight?: number; texName?: string } = {}): Promise<NpcMeshHandle | null> {
   const dot = meshFullName.indexOf(".");
@@ -81,8 +135,10 @@ export async function loadNpcMesh(meshFullName: string, opts: { targetHeight?: n
   const pkgName = meshFullName.slice(0, dot);
   const exportName = meshFullName.slice(dot + 1);
   const pkg = await loadPkg(pkgName);
-  const entry = pkg?.[exportName];
-  if (!entry) return null;
+  if (!pkg) return null;
+  const found = pickEntry(pkg, exportName);
+  if (!found) return null;
+  const entry = found.entry;
 
   const group = new THREE.Group();
   group.name = `Npc:${meshFullName}`;
@@ -129,6 +185,15 @@ export async function loadNpcMesh(meshFullName: string, opts: { targetHeight?: n
   const wrap = new THREE.Group();
   wrap.add(group);
   return { group: wrap, dispose: () => disposables.forEach((d) => d.dispose()) };
+}
+
+/** True iff the given mesh's package bundle is known to be missing on the server.
+ *  The caller can use this to decide whether to permanently skip an NPC or keep
+ *  retrying (e.g., never permanently mark — bundle may ship later). */
+export function isNpcPkgKnownMissing(meshFullName: string): boolean {
+  const dot = meshFullName.indexOf(".");
+  if (dot < 0) return false;
+  return _missingPkgs.has(resolveActualName(meshFullName.slice(0, dot)));
 }
 
 /** Derive a human-ish display name from a mesh export ("LineageMonsters.gremlin_m00" → "Gremlin"). */

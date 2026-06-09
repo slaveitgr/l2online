@@ -12,7 +12,7 @@ import {
   getDialogTarget,
 } from "@/lib/game-state";
 import { loadCharacterModel, type CharacterModelHandle } from "@/lib/character-mesh";
-import { loadNpcMesh, npcMeshInfo, npcMeshInfoSync, isNpcPkgLoaded } from "@/lib/npc-mesh";
+import { loadNpcMesh, npcMeshInfo, npcMeshInfoSync, isNpcPkgLoaded, isNpcPkgKnownMissing } from "@/lib/npc-mesh";
 
 /**
  * Phase 1.5 viewport.
@@ -232,6 +232,10 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       try {
         const info = await npcMeshInfo(e.displayId);
         if (info?.m) {
+          // If the package bundle is known-missing on the server, DON'T permanently
+          // mark this NPC as skipped — let the pump retry later in case a new
+          // bundle ships. The check itself is cheap (in-memory Set).
+          if (isNpcPkgKnownMissing(info.m)) return;
           placeModel(e.objectId, e.x, e.y, e.z, () => loadNpcMesh(info.m, { targetHeight: 3.4, texName: info.t?.[0] }), () => dropCapsule(e.objectId));
           upgradedOrSkipped.add(e.objectId);
           return;
