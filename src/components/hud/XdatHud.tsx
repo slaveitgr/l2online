@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
 import { useSprites } from "@/components/hud/L2Sprite";
 import { getGameConnection, type GameEvent, type PlayerState, type SkillEntry } from "@/lib/l2-protocol/game-client";
+import { registerNpcHtmlRenderer } from "@/lib/l2-protocol/npc-html-queue";
 import { L2XdatWindow, type XdatWindowKey } from "@/components/hud/L2XdatWindow";
 import { L2ExitDialog } from "@/components/hud/L2GameWindows";
 
@@ -446,6 +447,14 @@ export function XdatHud({ uiScale = 1.0, activeChar, chatLines, onExit, onSendCh
     });
     return off;
   }, [target?.objectId]);
+
+  // Register as the NpcHtml renderer: drains any messages that arrived while
+  // the HUD wasn't mounted yet (welcome dialog on enter-world), and shows the
+  // newest HTML for every subsequent bypass click.
+  useEffect(() => {
+    registerNpcHtmlRenderer((msg) => setHtmlWnd({ html: msg.html }));
+    return () => registerNpcHtmlRenderer(null);
+  }, []);
 
   // vitals: live protocol state wins, else the activeChar snapshot from /world
   const name = live.name ?? activeChar?.name ?? "—";

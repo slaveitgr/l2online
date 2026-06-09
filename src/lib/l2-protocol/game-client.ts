@@ -16,6 +16,7 @@ import { GameCrypt } from "./game-crypt";
 import { classNameOf, raceNameOf } from "./classes";
 import { PacketReader, PacketWriter } from "./packets";
 import { logUnknownOpcode } from "./unknown-opcode-log";
+import { queueNpcHtml } from "./npc-html-queue";
 
 export interface GameCharacter {
   id: string; // objectId as hex
@@ -975,7 +976,12 @@ export class L2GameClient {
     r.u8(); // 0x19
     const npcObjId = r.u32();
     const html = r.str();
-    if (html) this.emit({ type: "html", npcObjId, html });
+    if (!html) return;
+    this.emit({ type: "html", npcObjId, html });
+    // Also push to the global NpcHtml queue: enter-world can arrive BEFORE the
+    // HUD mounts its listener (welcome dialog otherwise lost). The queue holds
+    // messages ~60s and flushes the moment a renderer registers.
+    queueNpcHtml({ npcObjectId: npcObjId, html, receivedAt: Date.now() });
   }
 
   // ===== target/skill/admin action senders =====
