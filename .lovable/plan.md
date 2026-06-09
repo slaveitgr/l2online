@@ -1,64 +1,75 @@
-## Status του UTF-16 fix
+# FIX 1 — Texture fallback chain στον NPC extractor
 
-Έγινε ήδη στο προηγούμενο loop — `src/lib/l2-package.ts` γρ. 198–215 χειρίζεται σωστά αρνητικό `rawLen` (UTF-16LE, `|len|` code units). Δεν χρειάζεται τίποτα άλλο εκεί. Άρα το μπλόκο για S3 έχει φύγει.
+## Πού ζει το πρόβλημα
 
-Τώρα τα δύο σημεία από το review:
+Στο runtime, το `src/lib/npc-mesh.ts` φορτώνει pre-extracted PNG (`/models/npc/tex/<sanitised>.png`). Όταν λείπει το PNG, το mesh μένει με ουδέτερο beige (`#b8ad97`). Άρα τα «λευκά φαντάσματα» = textures που ο **offline extractor** απέτυχε να βγάλει.
 
-## 1. `parseCharInfo` — διάβασε classId + paperdoll
+Ο extractor είναι το `tools/l2-extract-npc-textures.mjs`. Σήμερα, γρ. 108–114:
 
-Αρχείο: `src/lib/l2-protocol/game-client.ts` γρ. 671–687.
-
-Τώρα σταματάει στο `female` και αγνοεί το υπόλοιπο, οπότε οι άλλοι παίχτες σπαουνάρουν «γυμνοί». Προέκταση μετά το `female`:
-
-- `r.u32()` → **classId** (χρειάζεται για να διαλέξουμε σωστό model/animation set).
-- Μερικά CharInfo builds έχουν `u32 unk` εδώ (Grand Crusade «class id 2 / level reveal»). Αν το running protocol είναι το 502 που ήδη υποστηρίζουμε, το pad είναι 1× u32. Διαβάζω + αγνοώ.
-- **Paperdoll slot ids** (u32 each) με τη γνωστή σειρά L2 paperdoll: under, rear, lear, neck, rfinger, lfinger, head, **rhand**, lhand, **gloves**, **chest**, **legs**, **feet**, cloak, lrhand, hair, hair2, rbracelet, lbracelet, talisman×6, belt. Για το rendering μας αρκούν: `rhand, lhand, gloves, chest, legs, feet, head, cloak`. Τα κρατάω όλα στο entity ως `equip: { slot: itemId }` για να μπορούμε να ντύσουμε bracelet/cloak αργότερα χωρίς νέο reparse.
-- Augment / enchant arrays που ακολουθούν → skip με ασφαλή `try/catch` (αν δεν είμαστε σίγουροι για μήκος, δεν πειράζουμε τίποτα μετά — το πακέτο είναι ήδη body-bounded).
-
-Αλλαγή στο `WorldEntity` (γρ. 52–67): πρόσθεσε προαιρετικά:
-```ts
-classId?: number;
-equip?: Partial<Record<
-  "rhand"|"lhand"|"gloves"|"chest"|"legs"|"feet"|"head"|"cloak",
-  number
->>;
+```js
+const want = [exportName + "_ori", exportName];           // (1) _ori, (2) exact
+for (const w of want) e = pkg.exps.find(...)
+if (!e) e = pkg.exps.find(x => x.objectName.startsWith(exportName) && isTex(x)) // (3) prefix
 ```
 
-Συμβατότητα: όλα προαιρετικά, οπότε δεν σπάει υπάρχοντες consumers (`WorldViewport`, `npc-spawn` handler).
+Δύο τρύπες: σειρά είναι ανάποδη από το spec, και δεν ακολουθεί Shader/FinalBlend chains όταν το export δεν είναι Texture.
 
-Σημείωση τιμών: 0 = κενό slot — να μην το προσθέτω στο `equip`.
+## Αλλαγή στον extractor
 
-## 2. `sendAttack` — shift πρέπει να είναι `false`
+Στο `tools/l2-extract-npc-textures.mjs`:
 
-Αρχείο ίδιο, γρ. 532–534.
+**1. Διόρθωσε τη σειρά αναζήτησης** σε ακριβώς αυτή που ζητάς:
+   1. exact `exportName` (Texture)
+   2. `exportName + "_ori"` (Texture)
+   3. `startsWith(exportName)` (Texture, εξαιρώντας `_sp/_sh/_n/_normal` που ήδη φιλτράρει το `notMap`)
+   4. Αν το ταυτοποιημένο export είναι **Shader / FinalBlend / Modifier / TexEnvMap / TexPanner** (όχι Texture), ακολούθησε την αλυσίδα properties (Diffuse → Material → Texture). Δες παρακάτω.
 
-```ts
-sendAttack(objectId: number) {
-  this.sendAction(objectId, false); // shift=1 = info window, όχι attack
-}
-```
+**2. Πρόσθεσε Shader-chain follower** (`resolveTextureChain(pkg, e, depth=0)`):
+   - Επανάχρηση της υπάρχουσας property-walk λογικής (όπως στο `readTexture` γρ. 47–48), αλλά αντί να μαζεύεις `Format/USize/VSize`, διάβασε τα ObjectProperty refs (`pt === 0x0a` με `ci()`) για ονόματα: `Diffuse`, `Material`, `Texture`, `FallbackMaterial`.
+   - Το object-ref είναι compact int: αν `> 0` → δείκτης σε `exps` (ίδιο πακέτο, 1-based). Αν `< 0` → import (`imps[-ref-1]`), δηλ. όνομα export σε **άλλο .utx**. Στην περίπτωση import: άνοιξε το αντίστοιχο .utx (μέσω `loadUtx(otherPkg)` — το package όνομα προκύπτει από τον parent name στον import table — χρειάζεται να επεκταθεί ο import parser για να κρατάει και το package).
+   - Επανάλαβε resolve στο νέο export. **Max depth 3**, guard με `Set<offset>` για κύκλους.
+   - Αν φτάσεις σε Texture export → επιστροφή `readTexture(pkg, e)`.
 
-Κρατάμε το `sendAction(id, true)` για ξεχωριστό `sendInspect(id)` helper, ώστε το UI να μπορεί να ζητάει info window χωρίς να μπερδεύεται με το attack path.
+**3. Επέκταση import parser** (γρ. 32): σήμερα κρατάει μόνο το όνομα του ClassName. Πρόσθεσε και το `packageName`: στο import row υπάρχουν δύο συμπληρωματικά name refs πριν το className — διάβασε το πρώτο (`packageName`) για να ξέρεις σε ποιο .utx να ψάξουμε. Επιστροφή `imps[i] = { className, packageName, objectName }`.
 
-Πρόσθεσε:
-```ts
-sendInspect(objectId: number) { this.sendAction(objectId, true); }
-```
+**4. Diagnostic όταν αποτυγχάνουν όλα τα βήματα 1-4:**
+   ```js
+   const nearest = pkg.exps
+     .filter(x => isTex(x))
+     .map(x => ({ name: x.objectName, d: levenshtein(x.objectName, exportName) }))
+     .sort((a, b) => a.d - b.d)
+     .slice(0, 5)
+     .map(x => x.name);
+   console.warn(`[tex-miss] ${full} — nearest: ${nearest.join(", ")}`);
+   ```
+   Σύντομη Levenshtein (≤30 γραμμές) inline στο tool — δεν προσθέτουμε dependency.
 
-Δεν αλλάζω τίποτα άλλο στο `sendAction` (το shift byte παραμένει ως 0/1).
+## Runtime touch (μικρή αλλαγή)
 
-## Έλεγχοι
-
-- Build: η αλλαγή είναι type-safe (όλα τα νέα fields optional).
-- Runtime smoke: μετά από EnterWorld, σε `npc-spawn` event με `isPlayer: true` πρέπει να έρχονται `classId` και `equip` με non-zero ids όταν ο άλλος παίχτης φοράει πραγματικά items.
-- Attack: αριστερό κλικ σε monster → ο server πρέπει να αρχίσει να στέλνει `Attack (0x05)` packets αντί για HTML/info.
+`src/lib/npc-mesh.ts` γρ. 90: το neutral material είναι ήδη beige `#b8ad97`. Άλλαξέ το σε **ουδέτερο γκρι** `#888888` (ή `0x888888`) όπως ζητάς, ώστε τα «λευκά» που προήλθαν από κάποιο άλλο code path να μην ξεγλιστράνε ως λευκά. Καμία άλλη logic αλλαγή — αν το PNG φορτώσει, η `mat.color` γίνεται `#ffffff` και πέφτει το tint.
 
 ## Αρχεία προς αλλαγή
 
-- `src/lib/l2-protocol/game-client.ts` — `WorldEntity` interface (+ classId/equip), `parseCharInfo` (επέκταση paperdoll read), `sendAttack` (shift=false), νέο `sendInspect`.
+- `tools/l2-extract-npc-textures.mjs` — σωστή σειρά, Shader-chain follower, επεκταμένο import parsing, levenshtein diagnostics.
+- `src/lib/npc-mesh.ts` — fallback χρώμα beige → γκρι (1 γραμμή).
 
-## Out of scope (εδώ)
+## Πώς ξανατρέχει το extractor
 
-- Map-loader συντεταγμένες/scale — το αφήνουμε για ξεχωριστό loop.
-- Πραγματικό attachment των equipment ids σε mesh slots (αυτό είναι S7 με Armorgrp.dat). Εδώ απλά τα φέρνουμε στο entity για να είναι διαθέσιμα.
-- Augment/enchant parsing — skip τώρα, όταν χρειαστεί enchant glow το ξαναπιάνουμε.
+Επανατρέχω με:
+```bash
+node tools/l2-extract-npc-textures.mjs --all
+```
+
+Το tool κάνει skip ό,τι PNG υπάρχει ήδη (γρ. 103), οπότε για να ξανα-δοκιμάσει τα missing πρέπει είτε να σβήσουμε τα missing markers (δεν υπάρχουν — απλά δεν γράφονται PNGs), οπότε ξανα-rescan όλα τα `tex` set και θα προσπαθήσει ξανά τα missing. Το output μετράει `decoded X / missing Y` — το `Y` πρέπει να πέσει σημαντικά.
+
+## Out of scope
+
+- Live in-browser UTX texture decode (το `src/lib/l2-protocol/texture-fallback.ts` που υπάρχει είναι skeleton για μελλοντική live αποκωδικοποίηση — δεν συνδέεται σε αυτό το loop, δεν αλλάζει συμπεριφορά runtime).
+- Character/armor textures (`l2-extract-character-textures.mjs`) — αν θες την ίδια διόρθωση και εκεί, σε επόμενο loop (παρόμοιο patch, διαφορετικό αρχείο).
+- Specular/normal/shadow extraction — παραμένουν φιλτραρισμένα.
+
+## Έλεγχος
+
+- Re-run extractor → νέο count: το `missing` πρέπει να μειωθεί.
+- Visual στο preview: NPCs που ήταν λευκά → εμφανίζουν texture. Όσα ακόμη λείπουν → γκρι (όχι λευκό).
+- Console (Node) πρέπει να εμφανίσει `[tex-miss]` lines με κοντινά exports για να ξέρουμε ποια ονόματα να επεξεργαστούμε χειροκίνητα.
