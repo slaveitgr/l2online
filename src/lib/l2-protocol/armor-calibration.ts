@@ -136,7 +136,7 @@ interface BonePos { name: string; pos: Vec3 }
 function bonePositions(sk: RefSkeleton): BonePos[] {
   const out: BonePos[] = [];
   for (const b of sk.bones as RefBone[]) {
-    const p = b.position ?? [0, 0, 0];
+    const p = b.pos ?? [0, 0, 0];
     out.push({ name: b.name, pos: [p[0], p[1], p[2]] });
   }
   return out;
