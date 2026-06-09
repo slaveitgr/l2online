@@ -833,6 +833,7 @@ export function WorldViewport({ onTargetTap, onGroundTap }: WorldViewportProps =
       entityModels.forEach((em) => { em.anim?.dispose(); if (em.handle) { scene.remove(em.handle.group); em.handle.dispose(); } });
       entityModels.clear();
       playerModelDisposed = true;
+      playerAnim?.dispose();
       if (playerModel) { scene.remove(playerModel.group); playerModel.dispose(); }
       if (mapGroup) scene.remove(mapGroup);
       mapDisposables.forEach((d) => d.dispose());
