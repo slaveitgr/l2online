@@ -78,8 +78,16 @@ function buildTerrainGeometry(terrain: IndexedTerrainInfo, heightmap: L2Texture,
   if (heightmap.format !== "G16" || heightmap.width < 2 || heightmap.height < 2) return null;
   if (heightmap.data.byteLength < heightmap.width * heightmap.height * 2) return null;
 
-  const width = heightmap.width;
-  const height = heightmap.height;
+  const width = terrain.heightmapTailX ?? heightmap.width;
+  const height = terrain.heightmapTailY ?? heightmap.height;
+  if (width * height * 2 > heightmap.data.byteLength) return null;
+
+  // Preferred path: TerrainInfo binary tail provides FCoords toWorld.
+  //   H = (x, y, height16) - origin;  worldL2 = (H·X, H·Y, H·Z)
+  // origin = toWorld[0..2]; X = toWorld[3..5]; Y = toWorld[6..8]; Z = toWorld[9..11].
+  const tw = terrain.toWorld;
+  const useFCoords = !!tw;
+  // Legacy fallback (scale + location) when the tail couldn't be parsed.
   const sx = terrain.terrainScale[0] || 128;
   const sy = terrain.terrainScale[1] || 128;
   const sz = (terrain.terrainScale[2] || 76) / 256;
@@ -95,11 +103,21 @@ function buildTerrainGeometry(terrain: IndexedTerrainInfo, heightmap: L2Texture,
     for (let x = 0; x < width; x++) {
       const i = x + y * width;
       const h = dv.getUint16(i * 2, true);
-      // subtract the scene origin (same frame as the static-mesh placements) so the
-      // terrain lands UNDER the player instead of at absolute world coords far away.
-      positions[i * 3] = baseX + x * sx - origin.x;
-      positions[i * 3 + 1] = baseY + y * sy - origin.y;
-      positions[i * 3 + 2] = baseZ + h * sz - origin.z;
+      let wx: number, wy: number, wz: number;
+      if (useFCoords && tw) {
+        const hx = x - tw[0], hy = y - tw[1], hz = h - tw[2];
+        wx = hx * tw[3] + hy * tw[4] + hz * tw[5];
+        wy = hx * tw[6] + hy * tw[7] + hz * tw[8];
+        wz = hx * tw[9] + hy * tw[10] + hz * tw[11];
+      } else {
+        wx = baseX + x * sx;
+        wy = baseY + y * sy;
+        wz = baseZ + h * sz;
+      }
+      // subtract the scene origin (same frame as the static-mesh placements)
+      positions[i * 3] = wx - origin.x;
+      positions[i * 3 + 1] = wy - origin.y;
+      positions[i * 3 + 2] = wz - origin.z;
       uvs[i * 2] = x / Math.max(1, width - 1);
       uvs[i * 2 + 1] = y / Math.max(1, height - 1);
     }
@@ -109,6 +127,7 @@ function buildTerrainGeometry(terrain: IndexedTerrainInfo, heightmap: L2Texture,
   for (let y = 0; y < height - 1; y++) {
     for (let x = 0; x < width - 1; x++) {
       const q = x + y * width;
+      // QuadVisibilityBitmap: bit 0 = hole (paved by a static-mesh placement).
       if (terrain.quadVisibilityBitmap && !bitsetHas(terrain.quadVisibilityBitmap, q)) continue;
       const a = x + y * width;
       const b = x + 1 + y * width;
@@ -126,6 +145,7 @@ function buildTerrainGeometry(terrain: IndexedTerrainInfo, heightmap: L2Texture,
   const indexArray = width * height > 65535 ? new Uint32Array(indices) : new Uint16Array(indices);
   geometry.setIndex(new THREE.BufferAttribute(indexArray, 1));
   geometry.computeVertexNormals();
+  geometry.userData.terrainCollider = true; // click-to-move raycast target
   return { geometry, width, height };
 }
 
