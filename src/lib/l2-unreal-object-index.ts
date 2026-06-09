@@ -194,6 +194,8 @@ export function readIndexedTerrainInfos(pkg: L2Package): IndexedTerrainInfo[] {
       };
     });
 
+    const tail = parseTerrainTail(pkg, exp, properties);
+
     terrains.push({
       exportIndex: i + 1,
       objectName: exp.objectName,
@@ -209,10 +211,68 @@ export function readIndexedTerrainInfos(pkg: L2Package): IndexedTerrainInfo[] {
       layerCount: layerProps.length,
       terrainLayers,
       rawProperties: properties,
+      toWorld: tail?.toWorld ?? null,
+      heightmapTailX: tail?.heightmapX ?? null,
+      heightmapTailY: tail?.heightmapY ?? null,
     });
   });
 
   return terrains;
+}
+
+/**
+ * Parse the binary tail of a TerrainInfo export that lives AFTER the tagged
+ * properties' "None" terminator. Layout (Ver111/L2):
+ *   sectors[]            object array  (compact32 count + count × compact32 ref)
+ *   sectorsX, sectorsY   i32 i32
+ *   toWorld              FCoords       (4×Vector3 = 48 bytes)
+ *   toHeightMap          FCoords       (48 bytes — present on most chronicles)
+ *   heightmapX, Y        i32 i32
+ *
+ * We only return the fields we use (toWorld + heightmap dims). Returns null
+ * if parsing falls off the end or numbers are obviously bogus — callers must
+ * fall back to the property-based scale/location formula.
+ */
+function parseTerrainTail(
+  pkg: L2Package,
+  exp: UExport,
+  properties: UnrealProperty[],
+): { toWorld: number[]; heightmapX: number; heightmapY: number } | null {
+  if (!properties.length) return null;
+  const last = properties[properties.length - 1];
+  let off = last.type === "Bool" ? last.valueOffset : last.valueOffset + last.size;
+  const end = exp.offset + exp.size;
+  if (off + 1 > end) return null;
+  // consume the "None" name terminator (compact32 nameIndex)
+  const cur: Cursor = { o: off };
+  readCompat32(pkg.bytes, cur);
+  // sectors[] — object array (count, then count compact32 refs)
+  const sectorCount = readCompat32(pkg.bytes, cur);
+  if (sectorCount < 0 || sectorCount > 65535) return null;
+  for (let s = 0; s < sectorCount; s++) {
+    if (cur.o >= end) return null;
+    readCompat32(pkg.bytes, cur);
+  }
+  // sectorsX, sectorsY (i32 i32) — skip
+  if (cur.o + 8 > end) return null;
+  cur.o += 8;
+  // toWorld (FCoords = 12 floats)
+  if (cur.o + 48 > end) return null;
+  const toWorld: number[] = [];
+  for (let i = 0; i < 12; i++) { toWorld.push(pkg.dv.getFloat32(cur.o, true)); cur.o += 4; }
+  // toHeightMap (12 floats) — skip
+  if (cur.o + 48 > end) return null;
+  cur.o += 48;
+  // heightmapX, Y (i32 i32)
+  if (cur.o + 8 > end) return null;
+  const hmx = pkg.dv.getInt32(cur.o, true);
+  const hmy = pkg.dv.getInt32(cur.o + 4, true);
+  if (hmx < 2 || hmx > 8192 || hmy < 2 || hmy > 8192) return null;
+  // sanity: at least one of toWorld's basis vectors must be finite & non-zero
+  const finite = toWorld.every((v) => Number.isFinite(v));
+  const anyAxis = toWorld.slice(3).some((v) => Math.abs(v) > 1e-6);
+  if (!finite || !anyAxis) return null;
+  return { toWorld, heightmapX: hmx, heightmapY: hmy };
 }
 
 export function bitsetHas(raw: UnrealRawArray | null, index: number): boolean {
